@@ -1,0 +1,152 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --muted: #737373;
+  --accent: #ff6b2b;
+  --border: rgba(0, 0, 0, 0.1);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --font-sans: var(--font-inter);
+}
+
+body {
+  background: #ffffff;
+  color: var(--foreground);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Silver / metallic gradient backdrop (onboarding) */
+.bg-metal {
+  background:
+    radial-gradient(120% 90% at 50% -10%, #ededf0 0%, transparent 55%),
+    linear-gradient(to bottom, #e7e7ea 0%, #d5d5da 45%, #adadb6 100%);
+}
+
+/* Blue gradient (dashboard home) */
+.bg-dash {
+  background:
+    radial-gradient(90% 60% at 50% 0%, #eaf1ff 0%, #ffffff 45%),
+    linear-gradient(160deg, #dbe7ff 0%, #f4f7ff 40%, #e6edff 100%);
+}
+
+/* Soft blue gradient behind the project editor window */
+.bg-editor {
+  background: linear-gradient(135deg, #d7e4fb 0%, #eef3fd 42%, #d4e2fb 100%);
+}
+
+/* Blue chrome orb */
+.orb-blue {
+  background: conic-gradient(from 210deg, #93b4f7, #eaf1ff, #4f79e8, #cdddfb, #2f57c9, #dbe7ff, #93b4f7);
+}
+
+/* Glossy black pill button */
+.btn-shine {
+  background: linear-gradient(to bottom, #3a3a3a, #0b0b0b);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 6px 16px -6px rgba(0, 0, 0, 0.5);
+}
+.btn-shine:hover {
+  background: linear-gradient(to bottom, #454545, #131313);
+}
+.btn-shine:active {
+  transform: translateY(0.5px);
+}
+
+/* Dark gradient heading text */
+.heading-grad {
+  background-image: linear-gradient(to bottom, #4a4a4a, #0a0a0a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Dropdown menu entrance */
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ---------- detail polish ---------- */
+
+/* Thin, quiet scrollbars everywhere */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Brand-tinted text selection */
+::selection {
+  background: rgba(255, 107, 43, 0.22);
+}
+
+/* Visible focus ring for keyboard navigation (buttons/links only, so
+   mouse-focused text inputs keep their border-based focus style) */
+button:focus-visible,
+a:focus-visible,
+[role="separator"]:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.55);
+  outline-offset: 2px;
+}
+
+/* Workflow edges "flow" while a run is in progress */
+.edge-flow {
+  stroke-dasharray: 6 6;
+  animation: edgeFlow 0.9s linear infinite;
+}
+@keyframes edgeFlow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .edge-flow {
+    stroke-dasharray: none;
+    animation: none;
+  }
+}
+
+/* Live figures must not reflow as they change. */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
