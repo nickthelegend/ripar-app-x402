@@ -6,22 +6,34 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { AGENTS, ENDPOINTS, WORKFLOWS } from "@/lib/app-data";
-import { Sidebar, type View } from "./sidebar";
+import { NAV, Sidebar, type View } from "./sidebar";
 import { OverviewView } from "./overview-view";
+import { ChatView, type Turn } from "./chat-view";
 import { EndpointsView } from "./endpoints-view";
 import { WorkflowsView } from "./workflows-view";
 import { AgentsView } from "./agents-view";
 
 export function AppShell() {
   const [view, setView] = useState<View>("overview");
+  // Held here so the conversation survives leaving Chat and coming back.
+  const [turns, setTurns] = useState<Turn[]>([]);
   const [nav, setNav] = useState(false);
   const [palette, setPalette] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
+  // A sentence typed into the Overview composer opens Chat with it already in
+  // the box. Leaving Chat drops it so it can't reappear on a later visit.
+  const [seed, setSeed] = useState("");
   const { toast } = useToast();
 
   const go = useCallback((v: View) => {
     setView(v);
     setNav(false);
+    if (v !== "chat") setSeed("");
+  }, []);
+
+  const ask = useCallback((text: string) => {
+    setSeed(text);
+    setView("chat");
   }, []);
 
   useEffect(() => {
@@ -61,14 +73,15 @@ export function AppShell() {
         </div>
 
         <main className="mx-auto max-w-[1120px] px-5 py-7 sm:px-8">
-          {view === "overview" && <OverviewView onGo={go} />}
+          {view === "overview" && <OverviewView onGo={go} onAsk={ask} />}
+          {view === "chat" && <ChatView seed={seed} turns={turns} setTurns={setTurns} />}
           {view === "endpoints" && <EndpointsView />}
           {view === "workflows" && <WorkflowsView />}
           {view === "agents" && <AgentsView />}
         </main>
       </div>
 
-      <Palette open={palette} onClose={() => setPalette(false)} onGo={go} />
+      {palette && <Palette onClose={() => setPalette(false)} onGo={go} />}
 
       <Modal open={withdraw} onClose={() => setWithdraw(false)} title="Withdraw to wallet" description="Settlement already lands in your own Algorand address — Ripar never holds the balance.">
         <p className="text-[13.5px] leading-relaxed text-neutral-600">
@@ -86,17 +99,16 @@ export function AppShell() {
   );
 }
 
-/** ⌘K across every surface, its entries built from the real data. */
-function Palette({ open, onClose, onGo }: { open: boolean; onClose: () => void; onGo: (v: View) => void }) {
+/** ⌘K across every surface, its entries built from the real data. Mounted only
+ *  while it is open, so closing it drops the query and the highlight without an
+ *  effect having to reach back in and reset them. */
+function Palette({ onClose, onGo }: { onClose: () => void; onGo: (v: View) => void }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
 
-  useEffect(() => { if (!open) { setQ(""); setSel(0); } }, [open]);
-
   const entries = [
-    ...(["overview", "endpoints", "workflows", "agents"] as View[]).map((v) => ({
-      label: v[0].toUpperCase() + v.slice(1), hint: "Go to", run: () => onGo(v),
-    })),
+    // Driven off NAV so a new surface reaches the palette by being navigable.
+    ...NAV.map((n) => ({ label: n.label, hint: "Go to", run: () => onGo(n.id) })),
     ...ENDPOINTS.map((e) => ({ label: e.name, hint: `Endpoint · /${e.slug}`, run: () => onGo("endpoints") })),
     ...WORKFLOWS.map((w) => ({ label: w.name, hint: "Workflow", run: () => onGo("workflows") })),
     ...AGENTS.map((a) => ({ label: a.name, hint: `Agent · @${a.handle}`, run: () => onGo("agents") })),
@@ -104,7 +116,6 @@ function Palette({ open, onClose, onGo }: { open: boolean; onClose: () => void; 
   const term = q.trim().toLowerCase();
   const results = (term ? entries.filter((e) => `${e.label} ${e.hint}`.toLowerCase().includes(term)) : entries).slice(0, 9);
 
-  if (!open) return null;
   return (
     <div className="fixed inset-0 z-[100] flex items-start justify-center bg-neutral-900/25 px-4 pt-[12vh] backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-black/10 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>

@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUpRight, Check, CornerDownLeft, Paperclip, Sparkles } from "lucide-react";
+import { ArrowUpRight, CornerDownLeft, Paperclip, Sparkles } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
   AGENTS, ENDPOINTS, RUNS, WORKFLOWS, callsThisMonth, compact, settledThisMonth, usd,
 } from "@/lib/app-data";
 import type { View } from "./sidebar";
-import { Metric, PageHead, Sheet, StatusPill } from "./bits";
+import { Metric, PageHead, Sheet } from "./bits";
 
 const PROMPTS = [
   "Price my summariser at 0.01 USDC and list it",
@@ -22,20 +22,18 @@ const OUTCOME = {
   failed: { dot: "bg-rose-500", label: "failed" },
 } as const;
 
-export function OverviewView({ onGo }: { onGo: (v: View) => void }) {
+export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: (text: string) => void }) {
   const [prompt, setPrompt] = useState("");
-  const [sent, setSent] = useState(false);
   const { toast } = useToast();
 
   const live = ENDPOINTS.filter((e) => e.status === "live").length;
   const armed = WORKFLOWS.filter((w) => w.status === "live").length;
   const working = AGENTS.filter((a) => a.status === "working" || a.status === "bidding").length;
 
+  /** The composer is a doorway — Chat is where the conversation actually lives. */
   function submit() {
     if (!prompt.trim()) return;
-    setSent(true);
-    toast("Composer is not wired to a model yet — this is the shape of the flow", "default");
-    setTimeout(() => setSent(false), 1600);
+    onAsk(prompt.trim());
     setPrompt("");
   }
 
@@ -81,13 +79,13 @@ export function OverviewView({ onGo }: { onGo: (v: View) => void }) {
                   type="button"
                   onClick={submit}
                   disabled={!prompt.trim()}
-                  aria-label="Send"
+                  aria-label="Ask in Chat"
                   className={cn(
                     "flex h-7 w-7 items-center justify-center rounded-full transition-all",
                     prompt.trim() ? "bg-neutral-900 text-white hover:bg-neutral-800" : "bg-neutral-200 text-neutral-400"
                   )}
                 >
-                  {sent ? <Check size={13} /> : <CornerDownLeft size={13} />}
+                  <CornerDownLeft size={13} />
                 </button>
               </div>
             </div>

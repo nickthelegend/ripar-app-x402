@@ -131,8 +131,10 @@ a:focus-visible,
   outline-offset: 2px;
 }
 
-/* Workflow edges "flow" while a run is in progress */
-.edge-flow {
+/* Workflow edges "flow" while a run is in progress. The class lands on the
+   edge group, so the path is named too rather than relying on inheritance. */
+.edge-flow,
+.edge-flow .react-flow__edge-path {
   stroke-dasharray: 6 6;
   animation: edgeFlow 0.9s linear infinite;
 }
@@ -142,7 +144,8 @@ a:focus-visible,
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .edge-flow {
+  .edge-flow,
+  .edge-flow .react-flow__edge-path {
     stroke-dasharray: none;
     animation: none;
   }
@@ -150,3 +153,64 @@ a:focus-visible,
 
 /* Live figures must not reflow as they change. */
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+/* ---------- React Flow, dressed to match the rest of the app ----------
+   React Flow's own stylesheet is imported from a component module, so it lands
+   after globals.css and wins on equal specificity. Every rule below is scoped
+   to .rf-canvas to sit one class higher and take the tie. */
+
+.rf-canvas .react-flow__handle {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1.5px solid rgba(0, 0, 0, 0.25);
+  transition: border-color 120ms, background-color 120ms;
+}
+.rf-canvas .react-flow__handle:hover,
+.rf-canvas .react-flow__handle.connectingfrom,
+.rf-canvas .react-flow__handle.connectingto {
+  border-color: var(--accent);
+  background: #fff3ec;
+}
+.rf-canvas .react-flow__edge-path { stroke: rgba(0, 0, 0, 0.22); stroke-width: 1.5; }
+.rf-canvas .react-flow__edge.selected .react-flow__edge-path,
+.rf-canvas .react-flow__edge:focus .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; }
+.rf-canvas .react-flow__connection-path { stroke: var(--accent); stroke-width: 2; }
+
+/* The card draws its own border and focus ring — drop the wrapper's. */
+.rf-canvas .react-flow__node { font-family: inherit; }
+.rf-canvas .react-flow__node:focus,
+.rf-canvas .react-flow__node:focus-visible { outline: none; }
+.rf-canvas .react-flow__node.selectable:focus-visible > div { outline: 2px solid rgba(37, 99, 235, 0.55); outline-offset: 2px; }
+
+.rf-canvas .react-flow__controls {
+  box-shadow: none;
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+}
+.rf-canvas .react-flow__controls-button {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: #ffffff;
+  fill: #737373;
+}
+.rf-canvas .react-flow__controls-button:last-child { border-bottom: none; }
+.rf-canvas .react-flow__controls-button:hover { background: rgba(0, 0, 0, 0.035); fill: #171717; }
+
+.rf-canvas .react-flow__minimap {
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.rf-canvas .react-flow__attribution {
+  background: transparent;
+  font-size: 9px;
+}
+.rf-canvas .react-flow__attribution a { color: rgba(0, 0, 0, 0.28); }

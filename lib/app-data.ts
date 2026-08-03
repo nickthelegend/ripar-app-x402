@@ -21,6 +21,16 @@ export type Endpoint = {
   updated: string;
 };
 
+export type StepKind = "trigger" | "call" | "condition" | "action";
+
+export type Step = {
+  name: string;
+  kind: StepKind;
+  // Only a paid call carries a price. Triggers and conditions cost nothing, and
+  // an onchain action pays network fees rather than x402.
+  price?: number; // USDC
+};
+
 export type Workflow = {
   id: string;
   name: string;
@@ -31,7 +41,7 @@ export type Workflow = {
   lastRun: string;
   costPerRun: number;
   successRate: number;
-  steps: { name: string; kind: "trigger" | "call" | "condition" | "action" }[];
+  steps: Step[];
 };
 
 export type Agent = {
@@ -73,13 +83,13 @@ export const ENDPOINTS: Endpoint[] = [
 
 export const WORKFLOWS: Workflow[] = [
   { id: "wf_8c21", name: "Liquidation Guard", summary: "Watches a Folks Finance position and tops up collateral before it breaches.", status: "live", trigger: "cron · every 5m", runs24h: 288, lastRun: "3 min ago", costPerRun: 0.02, successRate: 0.997,
-    steps: [{ name: "cron 5m", kind: "trigger" }, { name: "read health", kind: "call" }, { name: "health < 1.4", kind: "condition" }, { name: "supply collateral", kind: "action" }] },
+    steps: [{ name: "cron 5m", kind: "trigger" }, { name: "read health", kind: "call", price: 0.02 }, { name: "health < 1.4", kind: "condition" }, { name: "supply collateral", kind: "action" }] },
   { id: "wf_3f70", name: "Treasury Sweep", summary: "Moves idle USDC into the yield vault once a floor is cleared.", status: "live", trigger: "cron · hourly", runs24h: 24, lastRun: "41 min ago", costPerRun: 0.03, successRate: 1,
-    steps: [{ name: "cron 1h", kind: "trigger" }, { name: "read balance", kind: "call" }, { name: "balance > 500", kind: "condition" }, { name: "deposit", kind: "action" }] },
+    steps: [{ name: "cron 1h", kind: "trigger" }, { name: "read balance", kind: "call", price: 0.03 }, { name: "balance > 500", kind: "condition" }, { name: "deposit", kind: "action" }] },
   { id: "wf_5a12", name: "Feed Watchdog", summary: "Re-publishes the price feed if a quote goes stale.", status: "paused", trigger: "onchain · Swap", runs24h: 0, lastRun: "2 d ago", costPerRun: 0.01, successRate: 0.981,
-    steps: [{ name: "on Swap", kind: "trigger" }, { name: "read quote age", kind: "call" }, { name: "age > 60s", kind: "condition" }, { name: "republish", kind: "action" }] },
+    steps: [{ name: "on Swap", kind: "trigger" }, { name: "read quote age", kind: "call", price: 0.01 }, { name: "age > 60s", kind: "condition" }, { name: "republish", kind: "action" }] },
   { id: "wf_9b44", name: "Invoice Reconciler", summary: "Matches incoming USDC against open invoices each morning.", status: "draft", trigger: "cron · daily 09:00", runs24h: 0, lastRun: "never", costPerRun: 0.08, successRate: 0,
-    steps: [{ name: "cron daily", kind: "trigger" }, { name: "fetch receipts", kind: "call" }, { name: "unmatched > 0", kind: "condition" }, { name: "notify", kind: "action" }] },
+    steps: [{ name: "cron daily", kind: "trigger" }, { name: "fetch receipts", kind: "call", price: 0.08 }, { name: "unmatched > 0", kind: "condition" }, { name: "notify", kind: "action" }] },
 ];
 
 export const AGENTS: Agent[] = [

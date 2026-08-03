@@ -1,15 +1,16 @@
 "use client";
 
-import { Activity, Bot, LayoutGrid, Plug, Search, Settings, Wallet } from "lucide-react";
+import { Activity, Bot, LayoutGrid, MessageSquare, Plug, Search, Settings, Wallet } from "lucide-react";
 import { Mark } from "@/components/ui/mark";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
 import { settledThisMonth, usd } from "@/lib/app-data";
 
-export type View = "overview" | "endpoints" | "workflows" | "agents";
+export type View = "overview" | "chat" | "endpoints" | "workflows" | "agents";
 
 export const NAV: { id: View; label: string; Icon: typeof Activity }[] = [
   { id: "overview", label: "Overview", Icon: LayoutGrid },
+  { id: "chat", label: "Chat", Icon: MessageSquare },
   { id: "endpoints", label: "Endpoints", Icon: Plug },
   { id: "workflows", label: "Workflows", Icon: Activity },
   { id: "agents", label: "Agents", Icon: Bot },
