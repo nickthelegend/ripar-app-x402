@@ -7,7 +7,8 @@ import { AGENT_ORIGIN, MANIFEST_ROUTE } from "./agent-origin";
  * The workspace's real data layer.
  *
  * Every row here comes from something that exists: the live agent's own
- * manifest, and settlements read off Algorand MainNet. Nothing is invented.
+ * manifest, and settlements read off whichever Algorand network that manifest
+ * declares. Nothing is invented.
  *
  * Where there is genuinely nothing to show — no workflows, because that needs a
  * backend we have not built — the surface says so instead of inventing rows.

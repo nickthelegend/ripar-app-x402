@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Bot, ExternalLink } from "lucide-react";
 import { SlideOver } from "@/components/ui/slide-over";
 import { ago, shortAddr, useWorkspace, type RealAgent } from "@/lib/real-data";
+import { accountUrl, networkLabel } from "@/lib/explorer";
 import { EmptyState, Metric, PageHead, SearchInput, Segmented, Sheet, SortHeader } from "./bits";
 
 type Scope = "all" | "mine";
@@ -29,6 +30,9 @@ export function AgentsView() {
   const [open, setOpen] = useState<RealAgent | null>(null);
 
   const agents = data?.agents ?? [];
+  // Named from the chain these rows were actually read off, never assumed —
+  // the app follows whichever network the agent's manifest declares.
+  const net = networkLabel(data?.chain.network ?? "testnet");
   const counts = useMemo(
     () => ({ all: agents.length, mine: agents.filter((a) => a.mine).length }),
     [agents]
@@ -53,7 +57,7 @@ export function AgentsView() {
     <>
       <PageHead
         title="Agents"
-        subtitle="Every address here has actually been paid over x402 on Algorand MainNet. There is no registry to read, so an agent is defined by what it has earned rather than by what it claims."
+        subtitle={`Every address here has actually been paid over x402 on Algorand ${net}. There is no registry to read, so an agent is defined by what it has earned rather than by what it claims.`}
       />
 
       <div className="flex flex-wrap items-center gap-3 pb-4">
@@ -139,7 +143,7 @@ export function AgentsView() {
       )}
 
       <p className="mt-2.5 text-[12px] text-neutral-400">
-        Derived from x402 settlements on Algorand MainNet. An agent with one payer and many calls is
+        {`Derived from x402 settlements on Algorand ${net}. An agent with one payer and many calls is`}{" "}
         usually one operator testing; many distinct payers is the signal worth watching.
       </p>
 
@@ -149,7 +153,7 @@ export function AgentsView() {
             <div>
               <p className="break-all font-mono text-[12.5px] text-neutral-700">{open.address}</p>
               <a
-                href={`https://allo.info/account/${open.address}`}
+                href={accountUrl(open.address, data?.chain.network ?? "testnet")}
                 target="_blank"
                 rel="noreferrer"
                 className="mt-2 inline-flex items-center gap-1 text-[12.5px] text-neutral-500 underline underline-offset-2 hover:text-accent"

@@ -6,6 +6,7 @@ import { Menu, MenuItem } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
 import { usd } from "@/lib/app-data";
 import { useWorkspace } from "@/lib/real-data";
+import { networkLabel } from "@/lib/explorer";
 import { shortAddress } from "@/lib/algorand-address";
 import { useSettings } from "@/lib/settings";
 
@@ -43,6 +44,8 @@ export function Sidebar({
   // Real earnings, from settlements to the deployed agent's payout address.
   // It reads 0.00 until somebody actually pays, and that is the honest number.
   const { data: ws } = useWorkspace();
+  // Whichever chain the data layer is really reading, not a fixed label.
+  const chainName = networkLabel(ws?.chain.network ?? "testnet");
   const earned = ws?.mine.earnedUsdc ?? 0;
   const calls = ws?.mine.calls ?? 0;
   const initials = name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
@@ -53,7 +56,7 @@ export function Sidebar({
         <Mark size={26} />
         <span className="min-w-0 leading-tight">
           <span className="block truncate text-[13.5px] font-semibold text-neutral-900">Ripar</span>
-          <span className="block text-[11px] text-neutral-400">Algorand MainNet</span>
+          <span className="block text-[11px] text-neutral-400">Algorand {chainName}</span>
         </span>
       </div>
 

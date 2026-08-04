@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { AGENT_ORIGIN, ago, shortAddr, useWorkspace } from "@/lib/real-data";
 import type { View } from "./sidebar";
 import { EmptyState, Metric, PageHead, Sheet } from "./bits";
+import { networkLabel, txUrl } from "@/lib/explorer";
 
 const PROMPTS = [
   "Price my summariser at 0.01 USDC and list it",
@@ -19,6 +20,9 @@ const usd = (n: number, d = 2) =>
 export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: (t: string) => void }) {
   const [prompt, setPrompt] = useState("");
   const { data, status, error } = useWorkspace();
+  // The chain these figures were actually read from. Naming a network the app
+  // is not reading turns every "verify" link into a 404 on a real transaction.
+  const net = networkLabel(data?.chain.network ?? "testnet");
 
   function submit() {
     if (!prompt.trim()) return;
@@ -30,7 +34,7 @@ export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: 
     <>
       <PageHead
         title="Overview"
-        subtitle="Read live from Algorand MainNet and from your deployed agent's own manifest."
+        subtitle={`Read live from Algorand ${net} and from your deployed agent's own manifest.`}
       />
 
       {/* composer */}
@@ -116,7 +120,7 @@ export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: 
             hint: "recent x402 payments, all agents",
           },
           {
-            label: "MainNet round",
+            label: `${net} round`,
             value: data?.chain.round ? data.chain.round.toLocaleString("en-US") : "—",
             hint: data?.chain.blockTime ? `${data.chain.blockTime.toFixed(1)}s between blocks` : "measuring…",
           },
@@ -190,7 +194,7 @@ export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: 
                       <td className="px-3 py-2.5 text-right text-neutral-500">{ago(r.when)}</td>
                       <td className="px-3 py-2.5 text-right">
                         <a
-                          href={`https://allo.info/tx/${r.id}`}
+                          href={txUrl(r.id, data?.chain.network ?? "testnet")}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-0.5 font-mono text-[12px] text-neutral-500 hover:text-accent"
@@ -207,7 +211,7 @@ export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: 
         </Sheet>
 
         <p className="mt-2.5 text-[12px] text-neutral-400">
-          Read from Algorand MainNet via the public indexer. Your own agent is{" "}
+          {`Read from Algorand ${net} via the public indexer.`} Your own agent is{" "}
           <a href={AGENT_ORIGIN} target="_blank" rel="noreferrer" className="underline hover:text-neutral-700">
             {AGENT_ORIGIN.replace("https://", "")}
           </a>
