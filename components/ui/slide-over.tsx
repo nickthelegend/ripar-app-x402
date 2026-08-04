@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDialogStack } from "./dialog-stack";
 
 // Right-side drawer for secondary panels (version history, run history,
 // activity, notifications). Slides in from the edge; dismiss on scrim click
@@ -27,6 +28,8 @@ export function SlideOver({
   children: ReactNode;
   width?: string;
 }) {
+  useDialogStack(open);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -40,6 +43,8 @@ export function SlideOver({
     <AnimatePresence>
       {open && (
         <motion.div
+          // AnimatePresence identifies its children by key.
+          key="scrim"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -47,6 +52,8 @@ export function SlideOver({
           className="fixed inset-0 z-[70] flex justify-end bg-black/40 backdrop-blur-[2px]"
         >
           <motion.div
+            role="dialog"
+            aria-modal="true"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}

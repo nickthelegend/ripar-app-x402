@@ -1,13 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, Copy, Globe, MoreHorizontal, Pause, Play, Plus, Trash2 } from "lucide-react";
+import { FlaskConical, Globe, MoreHorizontal, Pause, Play, Plus, Rocket, Trash2 } from "lucide-react";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { Modal } from "@/components/ui/modal";
 import { SlideOver } from "@/components/ui/slide-over";
 import { useToast } from "@/components/ui/toast";
 import { ENDPOINTS, compact, usd, type Endpoint, type Status } from "@/lib/app-data";
-import { EmptyState, Metric, PageHead, SearchInput, Segmented, Sheet, SortHeader, StatusPill } from "./bits";
+import { CopyButton, EmptyState, Metric, PageHead, SearchInput, Segmented, Sheet, SortHeader, StatusPill } from "./bits";
+import { DeployModal } from "./deploy-modal";
+import { TestConsole } from "./test-console";
 
 type Filter = "all" | "live" | "paused" | "draft";
 type Field = "name" | "price" | "calls24h" | "earned" | "p50";
@@ -20,6 +22,8 @@ export function EndpointsView() {
   const [open, setOpen] = useState<Endpoint | null>(null);
   const [creating, setCreating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Endpoint | null>(null);
+  const [deploying, setDeploying] = useState<Endpoint | null>(null);
+  const [testing, setTesting] = useState<Endpoint | null>(null);
   const { toast } = useToast();
 
   const counts = useMemo(
@@ -158,6 +162,8 @@ export function EndpointsView() {
                           </button>
                         )}
                       >
+                        <MenuItem icon={<FlaskConical size={14} />} onClick={() => setTesting(e)}>Test</MenuItem>
+                        <MenuItem icon={<Rocket size={14} />} onClick={() => setDeploying(e)}>Deploy</MenuItem>
                         {e.status === "live" ? (
                           <MenuItem icon={<Pause size={14} />} onClick={() => setStatus(e.id, "paused", `Paused ${e.name}`)}>Pause</MenuItem>
                         ) : (
@@ -175,7 +181,15 @@ export function EndpointsView() {
       )}
 
       <SlideOver open={!!open} onClose={() => setOpen(null)} title={open?.name ?? ""} width="max-w-lg">
-        {open && <Detail e={open} onStatus={setStatus} onDelete={() => setConfirmDelete(open)} />}
+        {open && (
+          <Detail
+            e={open}
+            onStatus={setStatus}
+            onDelete={() => setConfirmDelete(open)}
+            onDeploy={() => setDeploying(open)}
+            onTest={() => setTesting(open)}
+          />
+        )}
       </SlideOver>
 
       <Modal
@@ -191,24 +205,28 @@ export function EndpointsView() {
       </Modal>
 
       <NewEndpoint open={creating} onClose={() => setCreating(false)} onCreate={(e) => setItems((p) => [e, ...p])} />
+
+      <DeployModal endpoint={deploying} open={!!deploying} onClose={() => setDeploying(null)} />
+      <TestConsole endpoint={testing} open={!!testing} onClose={() => setTesting(null)} />
     </>
   );
 }
 
-function Detail({ e, onStatus, onDelete }: { e: Endpoint; onStatus: (id: string, s: Status, v: string) => void; onDelete: () => void }) {
-  const [copied, setCopied] = useState(false);
+function Detail({
+  e,
+  onStatus,
+  onDelete,
+  onDeploy,
+  onTest,
+}: {
+  e: Endpoint;
+  onStatus: (id: string, s: Status, v: string) => void;
+  onDelete: () => void;
+  onDeploy: () => void;
+  onTest: () => void;
+}) {
   const url = `https://api.ripar.io/a/${e.slug}`;
   const snippet = `curl ${url} \\\n  -H 'content-type: application/json' \\\n  -d '{}'`;
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(snippet);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked — the snippet is on screen to select */
-    }
-  }
 
   return (
     <div className="space-y-7">
@@ -230,14 +248,7 @@ function Detail({ e, onStatus, onDelete }: { e: Endpoint; onStatus: (id: string,
       <div className="border-t border-black/[0.07] pt-5">
         <div className="flex items-center justify-between">
           <h3 className="text-[13px] font-semibold text-neutral-900">Call it</h3>
-          <button
-            type="button"
-            onClick={copy}
-            className="inline-flex items-center gap-1.5 rounded-md border border-black/10 px-2 py-1 text-[12px] text-neutral-500 transition-colors hover:text-neutral-900"
-          >
-            {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
-            {copied ? "Copied" : "Copy"}
-          </button>
+          <CopyButton text={snippet} what="the curl snippet" />
         </div>
         <pre className="mt-2.5 overflow-x-auto rounded-lg border border-black/[0.07] bg-neutral-50 p-3 font-mono text-[12px] leading-relaxed text-neutral-700">
 {snippet}
@@ -246,6 +257,22 @@ function Detail({ e, onStatus, onDelete }: { e: Endpoint; onStatus: (id: string,
           Unpaid, that returns <span className="font-mono">402</span> with the quote. Attach{" "}
           <span className="font-mono">X-PAYMENT</span> and retry to run it.
         </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onTest}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 px-3 py-1.5 text-[13px] font-medium text-neutral-700 transition-colors hover:border-black/20 hover:text-neutral-900"
+          >
+            <FlaskConical size={13} /> Open test console
+          </button>
+          <button
+            type="button"
+            onClick={onDeploy}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 px-3 py-1.5 text-[13px] font-medium text-neutral-700 transition-colors hover:border-black/20 hover:text-neutral-900"
+          >
+            <Rocket size={13} /> Deploy
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 border-t border-black/[0.07] pt-5">

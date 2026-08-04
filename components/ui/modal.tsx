@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDialogStack } from "./dialog-stack";
 
 // Centered modal with a dimmed scrim (dismiss on backdrop click / Escape).
 // Portaled to <body> so ancestors with backdrop-filter/transform (which trap
@@ -24,6 +25,8 @@ export function Modal({
   description?: ReactNode;
   className?: string;
 }) {
+  useDialogStack(open);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -37,6 +40,8 @@ export function Modal({
     <AnimatePresence>
       {open && (
         <motion.div
+          // AnimatePresence identifies its children by key.
+          key="scrim"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

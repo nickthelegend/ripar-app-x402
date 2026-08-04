@@ -21,14 +21,21 @@ export type Endpoint = {
   updated: string;
 };
 
-export type StepKind = "trigger" | "call" | "condition" | "action";
+export type StepKind = "trigger" | "call" | "condition" | "action" | "mcp";
+
+/** Every kind that may appear in a stored graph. The builder's "Add step"
+ *  toolbar offers a subset — an MCP step is added from the tool palette. */
+export const STEP_KIND_IDS: StepKind[] = ["trigger", "call", "condition", "action", "mcp"];
 
 export type Step = {
   name: string;
   kind: StepKind;
   // Only a paid call carries a price. Triggers and conditions cost nothing, and
-  // an onchain action pays network fees rather than x402.
+  // an onchain action pays network fees rather than x402. An MCP step carries
+  // one when the tool behind it is metered.
   price?: number; // USDC
+  // Set only on an MCP step: the catalogue tool it runs, e.g. "slack.post_message".
+  tool?: string;
 };
 
 export type Workflow = {
@@ -89,7 +96,7 @@ export const WORKFLOWS: Workflow[] = [
   { id: "wf_5a12", name: "Feed Watchdog", summary: "Re-publishes the price feed if a quote goes stale.", status: "paused", trigger: "onchain · Swap", runs24h: 0, lastRun: "2 d ago", costPerRun: 0.01, successRate: 0.981,
     steps: [{ name: "on Swap", kind: "trigger" }, { name: "read quote age", kind: "call", price: 0.01 }, { name: "age > 60s", kind: "condition" }, { name: "republish", kind: "action" }] },
   { id: "wf_9b44", name: "Invoice Reconciler", summary: "Matches incoming USDC against open invoices each morning.", status: "draft", trigger: "cron · daily 09:00", runs24h: 0, lastRun: "never", costPerRun: 0.08, successRate: 0,
-    steps: [{ name: "cron daily", kind: "trigger" }, { name: "fetch receipts", kind: "call", price: 0.08 }, { name: "unmatched > 0", kind: "condition" }, { name: "notify", kind: "action" }] },
+    steps: [{ name: "cron daily", kind: "trigger" }, { name: "fetch receipts", kind: "call", price: 0.08 }, { name: "unmatched > 0", kind: "condition" }, { name: "Post message", kind: "mcp", tool: "slack.post_message" }] },
 ];
 
 export const AGENTS: Agent[] = [
@@ -109,6 +116,59 @@ export const RUNS: Run[] = [
   { id: "req_7e02f", target: "compliance/sanctions", kind: "endpoint", outcome: "failed", cost: 0, ms: 5400, when: "31 min ago", tx: null },
   { id: "run_3f70b", target: "Treasury Sweep", kind: "workflow", outcome: "ok", cost: 0.03, ms: 2100, when: "41 min ago", tx: "1D77C904" },
 ];
+
+/* ── x402 facts the console, the logs and the receipts all quote ─────────── */
+
+/** USDC on Algorand MainNet. */
+export const USDC_ASSET_ID = "31566704";
+const USDC_DECIMALS = 6;
+export const X402_NETWORK = "algorand-mainnet";
+export const API_HOST = "api.ripar.io";
+
+/** Base units for the wire — 0.001 USDC is "1000". */
+export const baseUnits = (usdcAmount: number) => Math.round(usdcAmount * 10 ** USDC_DECIMALS).toString();
+
+/** Checksum-valid Algorand addresses standing in for callers. They belong to no
+ *  wallet — each is derived from a fixed label, so they are stable sample data. */
+export const SAMPLE_CALLERS = [
+  "Y354WNZCMZ7AZ2BBQN3YCWUXOU6WDAGLUMVZ2GJQ5BG4IK5MJIBRH3NXMU",
+  "2TKQXNZ6L34BCJJIY5F7NRXMWL4Z2Y3QMCY3OMG6EKOGLSI4R6IBVFWYGY",
+  "KAGXS4S3WEOG3S3PHMQG7TFRIX7OIXR4SYPCZWUP6J6STRDG35ZWDB7MA4",
+  "7NIX4IK6DLP2K7UFZHRQMDEDJSEKRSOQRJT6H3E5BRALLKPJLHBC3XMEDA",
+  "3BKQNHKMOVA6FXGDSNXNKEEA3WYHDLV275RECAW2CXGOJ3Q4PE66FJO3PM",
+];
+
+/** What a call to each endpoint looks like going in and coming back. Used by the
+ *  test console, so the bodies have to be the real shape, not lorem. */
+export const SAMPLE_IO: Record<string, { request: unknown; result: unknown }> = {
+  "algo-usd/spot": {
+    request: { pair: "ALGO/USD" },
+    result: { pair: "ALGO/USD", price: 0.2417, round: 48_210_556, sources: 7, signature: "ed25519:9f2c41a…d70b" },
+  },
+  "wallet-risk/score": {
+    request: { address: "Y354WNZCMZ7AZ2BBQN3YCWUXOU6WDAGLUMVZ2GJQ5BG4IK5MJIBRH3NXMU" },
+    result: { band: "low", score: 12, signals: ["age>2y", "no-mixer-hops", "no-sanctioned-counterparty"], checkedRound: 48_210_556 },
+  },
+  "extract/pdf-table": {
+    request: { url: "https://example.com/invoice-2026-07.pdf", pages: "1-2" },
+    result: { rows: 14, columns: ["date", "description", "qty", "unit", "total"], confidence: 0.96 },
+  },
+  "nft/rarity": {
+    request: { assetId: 1_284_444_102 },
+    result: { rank: 318, of: 10_000, rarestTrait: "background/aurora", traitScore: 41.7 },
+  },
+  "text/summarize": {
+    request: { text: "…up to 20,000 characters of source text…" },
+    result: { summary: "A 280-character digest of the payload.", characters: 268 },
+  },
+  "compliance/sanctions": {
+    request: { address: "2TKQXNZ6L34BCJJIY5F7NRXMWL4Z2Y3QMCY3OMG6EKOGLSI4R6IBVFWYGY" },
+    result: { match: false, listsChecked: ["OFAC-SDN", "EU-CFSP", "UK-HMT"], listVersion: "2026-08-01" },
+  },
+};
+
+export const sampleIoFor = (slug: string) =>
+  SAMPLE_IO[slug] ?? { request: {}, result: { ok: true } };
 
 /* ── derived summaries ─────────────────────────────────────────────────── */
 

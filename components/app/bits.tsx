@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { Search, X } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, Copy, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_TONE, type AgentStatus, type Status } from "@/lib/app-data";
 
@@ -189,5 +189,91 @@ export function SortHeader<K extends string>({
 export function Sheet({ children }: { children: ReactNode }) {
   return (
     <div className="overflow-hidden rounded-xl border border-black/[0.09] bg-white">{children}</div>
+  );
+}
+
+/** Copies `text` and says so. A blocked clipboard is reported rather than
+ *  swallowed, because the user is otherwise left believing they have the value. */
+export function CopyButton({
+  text,
+  label = "Copy",
+  what,
+  className,
+}: {
+  text: string;
+  label?: string;
+  /** Named in the screen-reader label, e.g. "Copy fly.toml". */
+  what?: string;
+  className?: string;
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setState("copied");
+    } catch {
+      // Insecure origin or a denied permission — the text is on screen to select.
+      setState("failed");
+    }
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setState("idle"), 1800);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      aria-label={what ? `${label} ${what}` : label}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 rounded-md border border-black/10 bg-white px-2 py-1 text-[12px] font-medium transition-colors",
+        state === "failed" ? "border-rose-200 text-rose-600" : "text-neutral-500 hover:border-black/20 hover:text-neutral-900",
+        className
+      )}
+    >
+      {state === "copied" ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+      <span aria-live="polite">
+        {state === "copied" ? "Copied" : state === "failed" ? "Select it instead" : label}
+      </span>
+    </button>
+  );
+}
+
+/** A named block of code or config with its own copy button. */
+export function CodeBlock({
+  title,
+  filename,
+  body,
+  note,
+  maxHeight = "none",
+}: {
+  title: string;
+  filename?: string;
+  body: string;
+  note?: ReactNode;
+  maxHeight?: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 pb-1.5">
+        <h4 className="text-[12.5px] font-semibold text-neutral-900">{title}</h4>
+        {filename && (
+          <span className="rounded bg-black/[0.04] px-1.5 py-px font-mono text-[11px] text-neutral-500">
+            {filename}
+          </span>
+        )}
+        <CopyButton text={body} what={filename ?? title} className="ml-auto" />
+      </div>
+      <pre
+        style={{ maxHeight }}
+        className="overflow-auto rounded-lg border border-black/[0.07] bg-neutral-50 p-3 font-mono text-[12px] leading-[1.65] text-neutral-700"
+      >
+        {body}
+      </pre>
+      {note && <p className="mt-1.5 text-[12px] leading-relaxed text-neutral-500">{note}</p>}
+    </div>
   );
 }

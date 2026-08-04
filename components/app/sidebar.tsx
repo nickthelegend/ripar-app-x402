@@ -1,12 +1,15 @@
 "use client";
 
-import { Activity, Bot, LayoutGrid, MessageSquare, Plug, Search, Settings, Wallet } from "lucide-react";
+import { Activity, Bot, Keyboard, LayoutGrid, MessageSquare, Plug, Receipt, ScrollText, Search, Settings, Wallet } from "lucide-react";
 import { Mark } from "@/components/ui/mark";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
 import { settledThisMonth, usd } from "@/lib/app-data";
+import { shortAddress } from "@/lib/algorand-address";
+import { useSettings } from "@/lib/settings";
 
-export type View = "overview" | "chat" | "endpoints" | "workflows" | "agents";
+export type View =
+  | "overview" | "chat" | "endpoints" | "workflows" | "agents" | "logs" | "receipts" | "settings";
 
 export const NAV: { id: View; label: string; Icon: typeof Activity }[] = [
   { id: "overview", label: "Overview", Icon: LayoutGrid },
@@ -14,6 +17,8 @@ export const NAV: { id: View; label: string; Icon: typeof Activity }[] = [
   { id: "endpoints", label: "Endpoints", Icon: Plug },
   { id: "workflows", label: "Workflows", Icon: Activity },
   { id: "agents", label: "Agents", Icon: Bot },
+  { id: "logs", label: "Logs", Icon: ScrollText },
+  { id: "receipts", label: "Receipts", Icon: Receipt },
 ];
 
 export function Sidebar({
@@ -22,13 +27,18 @@ export function Sidebar({
   onSearch,
   onWithdraw,
   onSettings,
+  onShortcuts,
 }: {
   view: View;
   onSelect: (v: View) => void;
   onSearch: () => void;
   onWithdraw: () => void;
   onSettings: () => void;
+  onShortcuts: () => void;
 }) {
+  const { name, payout } = useSettings();
+  const initials = name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+
   return (
     <div className="flex h-full w-full flex-col">
       <div className="flex items-center gap-2.5 px-3 py-3.5">
@@ -101,17 +111,18 @@ export function Sidebar({
               className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-black/[0.03]"
             >
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-red-500 text-[9px] font-bold text-white">
-                AC
+                {initials}
               </span>
               <span className="min-w-0 leading-tight">
-                <span className="block truncate text-[12.5px] font-medium text-neutral-800">Ava Chen</span>
-                <span className="block truncate font-mono text-[10.5px] text-neutral-400">PERA…K7QX</span>
+                <span className="block truncate text-[12.5px] font-medium text-neutral-800">{name}</span>
+                <span className="block truncate font-mono text-[10.5px] text-neutral-400">{shortAddress(payout)}</span>
               </span>
             </button>
           )}
         >
           <MenuItem icon={<Wallet size={14} />} onClick={onWithdraw}>Withdraw</MenuItem>
           <MenuItem icon={<Settings size={14} />} onClick={onSettings}>Settings</MenuItem>
+          <MenuItem icon={<Keyboard size={14} />} shortcut="?" onClick={onShortcuts}>Keyboard shortcuts</MenuItem>
         </Menu>
       </div>
     </div>

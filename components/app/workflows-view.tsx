@@ -13,6 +13,10 @@ type Filter = "all" | "live" | "paused" | "draft";
 
 const costOf = (steps: Step[]) => steps.reduce((sum, s) => sum + (s.price ?? 0), 0);
 
+// The server's copy of each chain, captured before the session edits anything.
+// The builder's "reset to saved" goes back to this, not to the live item.
+const SAVED_STEPS = new Map(WORKFLOWS.map((w) => [w.id, w.steps]));
+
 /** The step chain, rendered as the actual sequence rather than a summary. */
 function Chain({ steps, running }: { steps: Step[]; running?: number }) {
   return (
@@ -243,7 +247,8 @@ function Builder({
   onStatus: (id: string, status: Status, verb: string) => void;
   onSteps: (id: string, steps: Step[]) => void;
 }) {
-  const paid = workflow.steps.filter((s) => s.kind === "call").length;
+  // A metered MCP tool bills the same way a paid call does, so it counts here.
+  const paid = workflow.steps.filter((s) => s.kind === "call" || (s.kind === "mcp" && !!s.price)).length;
   const onStepsChange = useCallback((steps: Step[]) => onSteps(workflow.id, steps), [onSteps, workflow.id]);
 
   return (
@@ -309,7 +314,13 @@ function Builder({
         ))}
       </div>
 
-      <WorkflowCanvas key={workflow.id} workflow={workflow} runningStep={running} onStepsChange={onStepsChange} />
+      <WorkflowCanvas
+        key={workflow.id}
+        workflow={workflow}
+        saved={SAVED_STEPS.get(workflow.id) ?? workflow.steps}
+        runningStep={running}
+        onStepsChange={onStepsChange}
+      />
 
       <p className="mt-3 max-w-[76ch] text-[12.5px] leading-relaxed text-neutral-500">
         Each step is checkpointed. A retry resumes from the failed step rather than re-running

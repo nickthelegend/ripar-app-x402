@@ -2,20 +2,43 @@ name: ci
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
+
+# A newer push makes the older run's answer worthless, so stop paying for it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Nothing here publishes anything. Read-only is the entire requirement.
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: typecheck + build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+
+      # `npm ci` and not `npm install`: it fails when package.json and the
+      # lockfile disagree, which is one of the few classes of breakage a local
+      # run will happily paper over and a Vercel build will not.
       - run: npm ci
-      - run: npx tsc --noEmit
-      # No Supabase env in CI on purpose: the app must build and run in
-      # fallback mode (createClient() returns null).
-      - run: npm run build
+
+      # `next build` typechecks too, but only what the route graph reaches and
+      # only after a full compile. tsc fails in seconds and covers files that
+      # nothing imports yet.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # No Supabase env in CI, on purpose. Demo mode is a supported way to run
+      # this app, so the build has to survive createClient() returning null —
+      # and a green build here proves it still does.
+      - name: Build
+        run: npm run build

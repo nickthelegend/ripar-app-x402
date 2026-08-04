@@ -1,17 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Menu as MenuIcon, X } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import { useToast } from "@/components/ui/toast";
+import { useDialogStack } from "@/components/ui/dialog-stack";
 import { cn } from "@/lib/utils";
 import { AGENTS, ENDPOINTS, WORKFLOWS } from "@/lib/app-data";
+import { shortAddress } from "@/lib/algorand-address";
+import { useSettings } from "@/lib/settings";
 import { NAV, Sidebar, type View } from "./sidebar";
 import { OverviewView } from "./overview-view";
 import { ChatView, type Turn } from "./chat-view";
 import { EndpointsView } from "./endpoints-view";
 import { WorkflowsView } from "./workflows-view";
 import { AgentsView } from "./agents-view";
+import { LogsView } from "./logs-view";
+import { ReceiptsView } from "./receipts-view";
+import { SettingsView } from "./settings-view";
+import { ChordHint, ShortcutsOverlay, useShortcuts } from "./shortcuts";
 
 export function AppShell() {
   const [view, setView] = useState<View>("overview");
@@ -20,10 +26,11 @@ export function AppShell() {
   const [nav, setNav] = useState(false);
   const [palette, setPalette] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
+  const [help, setHelp] = useState(false);
   // A sentence typed into the Overview composer opens Chat with it already in
   // the box. Leaving Chat drops it so it can't reappear on a later visit.
   const [seed, setSeed] = useState("");
-  const { toast } = useToast();
+  const { payout } = useSettings();
 
   const go = useCallback((v: View) => {
     setView(v);
@@ -36,22 +43,28 @@ export function AppShell() {
     setView("chat");
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPalette((v) => !v);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  const { chord } = useShortcuts({
+    onGo: go,
+    onPalette: useCallback(() => setPalette((v) => !v), []),
+    onHelp: useCallback(() => setHelp((v) => !v), []),
+  });
+
+  const sidebar = (close?: () => void) => (
+    <Sidebar
+      view={view}
+      onSelect={go}
+      onSearch={() => { close?.(); setPalette(true); }}
+      onWithdraw={() => { close?.(); setWithdraw(true); }}
+      onSettings={() => go("settings")}
+      onShortcuts={() => { close?.(); setHelp(true); }}
+    />
+  );
 
   return (
     <div className="flex min-h-dvh bg-[#fafafa]">
       {/* desktop rail */}
       <aside className="sticky top-0 hidden h-dvh w-[228px] shrink-0 border-r border-black/[0.07] bg-white lg:block">
-        <Sidebar view={view} onSelect={go} onSearch={() => setPalette(true)} onWithdraw={() => setWithdraw(true)} onSettings={() => toast("Settings land with real accounts")} />
+        {sidebar()}
       </aside>
 
       {/* mobile drawer */}
@@ -59,7 +72,7 @@ export function AppShell() {
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-neutral-900/25 backdrop-blur-sm" onClick={() => setNav(false)} />
           <div className="absolute inset-y-0 left-0 w-[248px] border-r border-black/10 bg-white">
-            <Sidebar view={view} onSelect={go} onSearch={() => { setNav(false); setPalette(true); }} onWithdraw={() => { setNav(false); setWithdraw(true); }} onSettings={() => toast("Settings land with real accounts")} />
+            {sidebar(() => setNav(false))}
           </div>
         </div>
       )}
@@ -78,15 +91,21 @@ export function AppShell() {
           {view === "endpoints" && <EndpointsView />}
           {view === "workflows" && <WorkflowsView />}
           {view === "agents" && <AgentsView />}
+          {view === "logs" && <LogsView />}
+          {view === "receipts" && <ReceiptsView />}
+          {view === "settings" && <SettingsView />}
         </main>
       </div>
 
       {palette && <Palette onClose={() => setPalette(false)} onGo={go} />}
 
+      <ShortcutsOverlay open={help} onClose={() => setHelp(false)} />
+      <ChordHint show={chord} />
+
       <Modal open={withdraw} onClose={() => setWithdraw(false)} title="Withdraw to wallet" description="Settlement already lands in your own Algorand address — Ripar never holds the balance.">
         <p className="text-[13.5px] leading-relaxed text-neutral-600">
           There is nothing to withdraw from Ripar. Each paid call settles directly from the
-          caller to <span className="font-mono text-[12.5px]">PERA…K7QX</span>, so the funds are
+          caller to <span className="font-mono text-[12.5px]">{shortAddress(payout)}</span>, so the funds are
           already yours. This button exists to say so.
         </p>
         <div className="mt-5 flex justify-end">
@@ -105,10 +124,17 @@ export function AppShell() {
 function Palette({ onClose, onGo }: { onClose: () => void; onGo: (v: View) => void }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
+  // Mounted only while open, so it is always a live surface. Counted like any
+  // other dialog: without this, a `g`-chord fired while the box has focus
+  // anywhere but the field navigates the page behind it. ⌘K still closes it —
+  // that branch runs ahead of the dialog check.
+  useDialogStack(true);
 
   const entries = [
     // Driven off NAV so a new surface reaches the palette by being navigable.
     ...NAV.map((n) => ({ label: n.label, hint: "Go to", run: () => onGo(n.id) })),
+    // Settings lives in the account menu rather than the rail, so it is listed here.
+    { label: "Settings", hint: "Go to", run: () => onGo("settings") },
     ...ENDPOINTS.map((e) => ({ label: e.name, hint: `Endpoint · /${e.slug}`, run: () => onGo("endpoints") })),
     ...WORKFLOWS.map((w) => ({ label: w.name, hint: "Workflow", run: () => onGo("workflows") })),
     ...AGENTS.map((a) => ({ label: a.name, hint: `Agent · @${a.handle}`, run: () => onGo("agents") })),

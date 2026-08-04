@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import {
   Background,
   BackgroundVariant,
@@ -28,10 +37,15 @@ import {
   type XYPosition,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { ArrowRight, Clock, GitBranch, Trash2, Zap } from "lucide-react";
+import { ArrowRight, Blocks, Clock, GitBranch, PanelLeft, RotateCcw, Trash2, Zap } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { usd, type Step, type StepKind, type Workflow } from "@/lib/app-data";
+import { DND_MCP_TOOL, MCP_CATEGORIES, type McpTool } from "@/lib/mcp-tools";
+import { useMcpToolIndex } from "@/lib/mcp-servers";
+import { clearGraph, loadGraph, nextSeq, saveGraph, type WorkflowGraph } from "@/lib/workflow-graph";
 import { Sheet } from "./bits";
+import { MCP_CATEGORY_ICON, McpPalette } from "./mcp-palette";
 
 /** One table for what a step kind looks like, shared with the list's chain. */
 export const STEP_KINDS: Record<StepKind, {
@@ -45,8 +59,11 @@ export const STEP_KINDS: Record<StepKind, {
   call:      { label: "Paid call", Icon: Zap,        chip: "bg-orange-50 text-accent",       swatch: "#ff6b2b", blank: "new call" },
   condition: { label: "Condition", Icon: GitBranch,  chip: "bg-violet-50 text-violet-600",   swatch: "#8b5cf6", blank: "new condition" },
   action:    { label: "Action",    Icon: ArrowRight, chip: "bg-emerald-50 text-emerald-600", swatch: "#10b981", blank: "new action" },
+  mcp:       { label: "MCP tool",  Icon: Blocks,     chip: "bg-indigo-50 text-indigo-600",   swatch: "#6366f1", blank: "new tool" },
 };
 
+// The toolbar's kinds. An MCP step is never blank — it comes from the palette
+// with a tool already attached — so it is not offered here.
 const KIND_ORDER: StepKind[] = ["trigger", "call", "condition", "action"];
 
 /** What the palette hands over on a drag, and what the pane reads on drop. */
@@ -55,6 +72,8 @@ const DND_KIND = "application/ripar-step";
 type StepData = {
   name: string;
   price?: number;
+  /** Set only on an MCP step: which catalogue tool it runs. */
+  tool?: string;
   // Set only on the copy handed to React Flow while a run walks the chain, so a
   // transient highlight can never leak back into the workflow's steps.
   running?: boolean;
@@ -70,6 +89,9 @@ type StepNode = Node<StepData, StepKind> & { type: StepKind };
 // pane can be ~700px, so a 0.75 floor left the last node clipped after fitView.
 const FIT: FitViewOptions = { padding: 0.12, minZoom: 0.4, maxZoom: 1 };
 
+/** Half a card, so a drop lands under the cursor rather than beside it. */
+const CARD = { w: 212, h: 52 };
+
 const defaultEdgeOptions: DefaultEdgeOptions = {
   type: "smoothstep",
   markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "rgba(0,0,0,0.35)" },
@@ -81,14 +103,20 @@ function StepCard({
   kind,
   data,
   selected,
+  icon: Icon = STEP_KINDS[kind].Icon,
+  chip = STEP_KINDS[kind].chip,
+  sub = STEP_KINDS[kind].label,
   children,
 }: {
   kind: StepKind;
   data: StepData;
   selected?: boolean;
+  /** An MCP card wears its tool's category rather than the kind's own mark. */
+  icon?: typeof Clock;
+  chip?: string;
+  sub?: string;
   children?: ReactNode;
 }) {
-  const k = STEP_KINDS[kind];
   return (
     <div
       className={cn(
@@ -101,12 +129,12 @@ function StepCard({
       )}
     >
       <div className="flex h-7 items-center gap-2 px-3 pt-2.5">
-        <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md", k.chip)}>
-          <k.Icon size={13} />
+        <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md", chip)}>
+          <Icon size={13} />
         </span>
         <span className="min-w-0 flex-1 leading-tight">
           <span className="block truncate text-[12.5px] font-medium text-neutral-900">{data.name}</span>
-          <span className="block text-[10.5px] text-neutral-400">{k.label}</span>
+          <span className="block truncate text-[10.5px] text-neutral-400">{sub}</span>
         </span>
       </div>
       {children}
@@ -171,12 +199,43 @@ function ActionNode({ data, selected }: NodeProps<StepNode>) {
   );
 }
 
+/** The tool behind the step, resolved live: detaching its server leaves the
+ *  card standing and says so rather than dropping the step out of the graph. */
+function McpNode({ data, selected }: NodeProps<StepNode>) {
+  const tools = useMcpToolIndex();
+  const tool = data.tool ? tools.get(data.tool) : undefined;
+  const category = tool ? MCP_CATEGORIES[tool.category] : null;
+
+  return (
+    <>
+      <Handle type="target" position={Position.Left} />
+      <StepCard
+        kind="mcp"
+        data={data}
+        selected={selected}
+        icon={tool ? MCP_CATEGORY_ICON[tool.category] : STEP_KINDS.mcp.Icon}
+        chip={category?.chip ?? STEP_KINDS.mcp.chip}
+        sub={tool && category ? `MCP · ${tool.serverLabel ?? category.label}` : "MCP · tool not attached"}
+      >
+        <div className="mx-3 mt-2 flex items-baseline justify-between gap-2 border-t border-black/[0.06] pt-2">
+          <span className="min-w-0 truncate font-mono text-[10px] text-neutral-400">{data.tool ?? "no tool"}</span>
+          <span className="tnum shrink-0 text-[11.5px] font-medium text-neutral-700">
+            {data.price ? `${usd(data.price, 3)} USDC` : "free"}
+          </span>
+        </div>
+      </StepCard>
+      <Handle type="source" position={Position.Right} />
+    </>
+  );
+}
+
 // Module scope on purpose: rebuilding this object per render remounts every node.
 const nodeTypes: NodeTypes = {
   trigger: TriggerNode,
   call: CallNode,
   condition: ConditionNode,
   action: ActionNode,
+  mcp: McpNode,
 };
 
 /* ── graph ⇄ steps ─────────────────────────────────────────────────────── */
@@ -215,7 +274,7 @@ function ordered(nodes: StepNode[], edges: Edge[]): StepNode[] {
 }
 
 const toSteps = (nodes: StepNode[], edges: Edge[]): Step[] =>
-  ordered(nodes, edges).map((n) => ({ name: n.data.name, kind: n.type, price: n.data.price }));
+  ordered(nodes, edges).map((n) => ({ name: n.data.name, kind: n.type, price: n.data.price, tool: n.data.tool }));
 
 /** One id scheme for every edge — seeded, auto-wired or hand-drawn. */
 const edgeId = (source: string, branch: string | undefined, target: string) =>
@@ -229,7 +288,7 @@ function fromSteps(steps: Step[]): { nodes: StepNode[]; edges: Edge[] } {
     id: `s${i + 1}`,
     type: s.kind,
     position: { x: i * 264, y: 0 },
-    data: { name: s.name, price: s.price },
+    data: { name: s.name, price: s.price, tool: s.tool },
   }));
   const edges: Edge[] = nodes.slice(1).map((n, i) => {
     const branch = defaultBranch(nodes[i]);
@@ -244,14 +303,66 @@ function fromSteps(steps: Step[]): { nodes: StepNode[]; edges: Edge[] } {
   return { nodes, edges };
 }
 
+/* ── graph ⇄ stored draft ──────────────────────────────────────────────── */
+
+const toGraph = (nodes: StepNode[], edges: Edge[]): WorkflowGraph => ({
+  // Positions are rounded: sub-pixel drift would rewrite the draft on every drag.
+  nodes: nodes.map((n) => ({
+    id: n.id,
+    kind: n.type,
+    x: Math.round(n.position.x),
+    y: Math.round(n.position.y),
+    name: n.data.name,
+    price: n.data.price,
+    tool: n.data.tool,
+  })),
+  edges: edges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    sourceHandle: e.sourceHandle ?? undefined,
+  })),
+});
+
+const fromGraph = (g: WorkflowGraph): { nodes: StepNode[]; edges: Edge[] } => ({
+  nodes: g.nodes.map((n) => ({
+    id: n.id,
+    type: n.kind,
+    position: { x: n.x, y: n.y },
+    data: { name: n.name, price: n.price, tool: n.tool },
+  })),
+  edges: g.edges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    sourceHandle: e.sourceHandle,
+    ...defaultEdgeOptions,
+  })),
+});
+
+const clock = (at: number) =>
+  new Date(at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+
 /* ── canvas ────────────────────────────────────────────────────────────── */
+
+/** Nothing to subscribe to — the snapshot pair alone is what tells the canvas
+ *  it is past hydration. */
+const noSubscribe = () => () => {};
 
 export function WorkflowCanvas(props: {
   workflow: Workflow;
+  /** The server's copy of the chain — what "reset to saved" goes back to. */
+  saved?: Step[];
   /** Index into the workflow's steps while a run walks the chain. */
   runningStep?: number;
   onStepsChange?: (steps: Step[]) => void;
 }) {
+  // The draft lives in localStorage, which the server cannot read. Mounting the
+  // canvas only after hydration lets it seed from the draft in one pass, rather
+  // than drawing the stored chain and swapping it out a frame later.
+  const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false);
+  if (!hydrated) return <CanvasSkeleton />;
+
   // useReactFlow() is called by Canvas itself, which is exactly the case the
   // provider exists for — <ReactFlow> alone does not supply the store.
   return (
@@ -261,22 +372,57 @@ export function WorkflowCanvas(props: {
   );
 }
 
+function CanvasSkeleton() {
+  // Holds the builder's frame — toolbar, tool rail, pane, inspector — so the
+  // page does not jump when the real canvas takes over a frame later.
+  return (
+    <Sheet>
+      <div className="h-[45px] border-b border-black/[0.07]" />
+      <div className="flex flex-col md:h-[520px] md:flex-row">
+        <div className="border-b border-black/[0.07] md:w-[218px] md:shrink-0 md:border-b-0 md:border-r" />
+        <div className="flex h-[380px] min-w-0 items-center justify-center bg-[#fbfbfb] md:h-auto md:flex-1">
+          <p className="animate-pulse text-[13px] text-neutral-400">Loading the builder…</p>
+        </div>
+        <div className="border-t border-black/[0.07] md:w-[264px] md:shrink-0 md:border-l md:border-t-0" />
+      </div>
+    </Sheet>
+  );
+}
+
 function Canvas({
   workflow,
+  saved,
   runningStep,
   onStepsChange,
 }: {
   workflow: Workflow;
+  saved?: Step[];
   runningStep?: number;
   onStepsChange?: (steps: Step[]) => void;
 }) {
-  // Seeded once. The caller keys this component by workflow id, so switching
-  // workflows remounts rather than trying to reconcile two graphs.
-  const [seed] = useState(() => fromSteps(workflow.steps));
+  // Seeded once, from the locally stored draft when there is one. The caller
+  // keys this component by workflow id, so switching workflows remounts rather
+  // than trying to reconcile two graphs.
+  const [seed] = useState(() => {
+    const draft = loadGraph(workflow.id);
+    const graph = draft ? fromGraph(draft) : fromSteps(workflow.steps);
+    return { ...graph, at: draft?.at ?? null, signature: JSON.stringify(toGraph(graph.nodes, graph.edges)) };
+  });
   const [nodes, setNodes] = useState<StepNode[]>(seed.nodes);
   const [edges, setEdges] = useState<Edge[]>(seed.edges);
-  const seq = useRef(seed.nodes.length);
-  const { screenToFlowPosition, setCenter, getZoom } = useReactFlow();
+  // A phone has no room for the tool rail stacked above the canvas, so it
+  // starts collapsed there. Reading the width here is safe: this component
+  // only ever mounts in the browser.
+  const [tools, setTools] = useState(() => window.innerWidth >= 768);
+  const [dropping, setDropping] = useState(false);
+  const [draftAt, setDraftAt] = useState<number | null>(seed.at);
+  const seq = useRef(nextSeq(seed.nodes));
+  // What is on disk, so an untouched graph is never written back over itself.
+  const stored = useRef(seed.signature);
+  const pane = useRef<HTMLDivElement>(null);
+  const { screenToFlowPosition, setCenter, getZoom, fitView } = useReactFlow();
+  const catalogue = useMcpToolIndex();
+  const { toast } = useToast();
 
   const selectedNode = nodes.find((n) => n.selected) ?? null;
   const selectedEdge = edges.find((e) => e.selected) ?? null;
@@ -291,6 +437,28 @@ function Canvas({
     sent.current = key;
     onStepsChange?.(steps);
   }, [nodes, edges, onStepsChange]);
+
+  /** React Flow frames on init only, so a graph swapped in later asks for its
+   *  own frame — once the new cards have been measured. */
+  const frame = useCallback(() => {
+    setTimeout(() => void fitView(FIT), 80);
+  }, [fitView]);
+
+  // Debounced so a drag writes once it settles, not once per animation frame.
+  useEffect(() => {
+    const graph = toGraph(nodes, edges);
+    const payload = JSON.stringify(graph);
+    if (payload === stored.current) return;
+    const t = setTimeout(() => {
+      const at = saveGraph(workflow.id, graph);
+      // A browser that refuses to store leaves stored.current alone, so the
+      // next edit tries again rather than silently reporting a saved draft.
+      if (at == null) return;
+      stored.current = payload;
+      setDraftAt(at);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [nodes, edges, workflow.id]);
 
   const onNodesChange: OnNodesChange<StepNode> = useCallback(
     (changes) => setNodes((prev) => applyNodeChanges(changes, prev)),
@@ -348,21 +516,16 @@ function Canvas({
    * from the toolbar continues the chain instead: it lands to the right of the
    * selection (or the tail) and wires itself up.
    */
-  const addStep = useCallback(
-    (kind: StepKind, at?: XYPosition) => {
+  const addNode = useCallback(
+    (init: { kind: StepKind } & StepData, at?: XYPosition) => {
+      const { kind, ...data } = init;
       const id = `s${++seq.current}`;
       const anchor = at ? null : (nodes.find((n) => n.selected) ?? ordered(nodes, edges).at(-1) ?? null);
       const position = at ?? (anchor ? { x: anchor.position.x + 264, y: anchor.position.y } : { x: 24, y: 24 });
 
       setNodes((prev) => [
         ...prev.map((n) => (n.selected ? { ...n, selected: false } : n)),
-        {
-          id,
-          type: kind,
-          position,
-          selected: true,
-          data: { name: STEP_KINDS[kind].blank, price: kind === "call" ? 0.01 : undefined },
-        },
+        { id, type: kind, position, selected: true, data },
       ]);
 
       // A trigger opens a chain, so it is never wired behind anything.
@@ -382,10 +545,34 @@ function Canvas({
 
       // A step added from the toolbar lands off the right of a long chain, so
       // the view follows it. A dropped one is already under the cursor.
-      if (!at) setCenter(position.x + 106, position.y + 52, { zoom: getZoom(), duration: 240 });
+      if (!at) setCenter(position.x + CARD.w / 2, position.y + CARD.h, { zoom: getZoom(), duration: 240 });
     },
     [nodes, edges, setCenter, getZoom]
   );
+
+  const addStep = useCallback(
+    (kind: StepKind, at?: XYPosition) =>
+      addNode({ kind, name: STEP_KINDS[kind].blank, price: kind === "call" ? 0.01 : undefined }, at),
+    [addNode]
+  );
+
+  const addTool = useCallback(
+    (tool: McpTool, at?: XYPosition) => addNode({ kind: "mcp", name: tool.name, price: tool.price, tool: tool.id }, at),
+    [addNode]
+  );
+
+  /** Where the keyboard drops a tool: the middle of the pane, stepped aside if
+   *  a card already sits there so repeated adds don't stack into one. */
+  const centre = useCallback((): XYPosition | undefined => {
+    const box = pane.current?.getBoundingClientRect();
+    if (!box) return undefined;
+    const at = screenToFlowPosition({ x: box.left + box.width / 2, y: box.top + box.height / 2 });
+    let spot = { x: at.x - CARD.w / 2, y: at.y - CARD.h / 2 };
+    while (nodes.some((n) => Math.abs(n.position.x - spot.x) < 24 && Math.abs(n.position.y - spot.y) < 24)) {
+      spot = { x: spot.x + 28, y: spot.y + 28 };
+    }
+    return spot;
+  }, [nodes, screenToFlowPosition]);
 
   const updateStep = useCallback((id: string, patch: Partial<StepData> & { kind?: StepKind }) => {
     const { kind, ...data } = patch;
@@ -394,7 +581,9 @@ function Canvas({
         if (n.id !== id) return n;
         // Price belongs to paid calls only, so it follows the kind.
         const priced = kind == null ? {} : kind === "call" ? { price: n.data.price ?? 0.01 } : { price: undefined };
-        return { ...n, type: kind ?? n.type, data: { ...n.data, ...priced, ...data } };
+        // A tool reference means nothing once the step is no longer an MCP one.
+        const tooled = kind == null || kind === "mcp" ? {} : { tool: undefined };
+        return { ...n, type: kind ?? n.type, data: { ...n.data, ...priced, ...tooled, ...data } };
       })
     );
   }, []);
@@ -408,12 +597,33 @@ function Canvas({
     setEdges((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
+  const resetToSaved = useCallback(() => {
+    const base = fromSteps(saved ?? workflow.steps);
+    clearGraph(workflow.id);
+    stored.current = JSON.stringify(toGraph(base.nodes, base.edges));
+    seq.current = base.nodes.length;
+    setNodes(base.nodes);
+    setEdges(base.edges);
+    setDraftAt(null);
+    frame();
+    toast("Reverted to the saved workflow");
+  }, [saved, workflow.id, workflow.steps, frame, toast]);
+
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    const kind = event.dataTransfer.getData(DND_KIND);
-    if (!KIND_ORDER.includes(kind as StepKind)) return;
+    setDropping(false);
     const at = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    addStep(kind as StepKind, { x: at.x - 106, y: at.y - 26 });
+    const spot = { x: at.x - CARD.w / 2, y: at.y - CARD.h / 2 };
+
+    const toolId = event.dataTransfer.getData(DND_MCP_TOOL);
+    if (toolId) {
+      const tool = catalogue.get(toolId);
+      // The tool's server can be detached mid-drag; then there is nothing to add.
+      if (tool) addTool(tool, spot);
+      return;
+    }
+    const kind = event.dataTransfer.getData(DND_KIND);
+    if (KIND_ORDER.includes(kind as StepKind)) addStep(kind as StepKind, spot);
   }
 
   // The active step, and the edges leaving it, are marked on the copy React Flow
@@ -441,7 +651,16 @@ function Canvas({
   return (
     <Sheet>
       <div className="flex flex-wrap items-center gap-2 border-b border-black/[0.07] px-3 py-2.5">
-        <span className="text-[12px] font-medium text-neutral-500">Add step</span>
+        <button
+          type="button"
+          onClick={() => setTools((v) => !v)}
+          aria-expanded={tools}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition-colors hover:border-black/20 hover:text-neutral-900"
+        >
+          <PanelLeft size={12} className="text-neutral-400" />
+          {tools ? "Hide tools" : "Show tools"}
+        </button>
+        <span className="ml-1 text-[12px] font-medium text-neutral-500">Add step</span>
         {KIND_ORDER.map((kind) => {
           const k = STEP_KINDS[kind];
           return (
@@ -461,25 +680,50 @@ function Canvas({
             </button>
           );
         })}
-        <span className="ml-auto hidden text-[12px] text-neutral-400 lg:block">
-          Drag a handle to connect · Delete removes the selection
-        </span>
+
+        {draftAt != null && (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-[12px] text-neutral-400">
+              Draft saved <span className="tnum">{clock(draftAt)}</span>
+            </span>
+            <button
+              type="button"
+              onClick={resetToSaved}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition-colors hover:border-black/20 hover:text-neutral-900"
+            >
+              <RotateCcw size={12} className="text-neutral-400" /> Reset to saved
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col md:h-[520px] md:flex-row">
+        {tools && <McpPalette onAdd={(tool) => addTool(tool, centre())} />}
+
         <div
+          ref={pane}
           onDrop={onDrop}
           onDragOver={(e) => {
             e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
+            e.dataTransfer.dropEffect = e.dataTransfer.types.includes(DND_MCP_TOOL) ? "copy" : "move";
+            if (!dropping) setDropping(true);
           }}
-          className="relative h-[380px] min-w-0 bg-[#fbfbfb] md:h-auto md:flex-1"
+          onDragLeave={(e) => {
+            // Crossing onto a child fires dragleave too — only the pane counts.
+            const to = e.relatedTarget as Element | null;
+            if (!to || !e.currentTarget.contains(to)) setDropping(false);
+          }}
+          className={cn(
+            "relative h-[380px] min-w-0 bg-[#fbfbfb] md:h-auto md:flex-1",
+            dropping && "ring-2 ring-inset ring-accent/40"
+          )}
         >
           {nodes.length === 0 && (
             <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center px-6 text-center">
               <p className="text-[14px] font-medium text-neutral-800">No steps yet</p>
               <p className="mt-1.5 max-w-[38ch] text-[13px] leading-relaxed text-neutral-500">
-                Add a trigger to arm the chain, then a paid call for the work it should buy.
+                Add a trigger to arm the chain, then a paid call for the work it should buy — or
+                drag an MCP tool in from the left.
               </p>
             </div>
           )}
@@ -513,7 +757,11 @@ function Canvas({
               maskColor="rgba(0,0,0,0.06)"
               nodeStrokeWidth={0}
               nodeBorderRadius={3}
-              nodeColor={(n) => STEP_KINDS[n.type].swatch}
+              nodeColor={(n) => {
+                if (n.type !== "mcp") return STEP_KINDS[n.type].swatch;
+                const tool = n.data.tool ? catalogue.get(n.data.tool) : undefined;
+                return tool ? MCP_CATEGORIES[tool.category].swatch : STEP_KINDS.mcp.swatch;
+              }}
               style={{ width: 148, height: 96 }}
             />
           </ReactFlow>
@@ -524,6 +772,7 @@ function Canvas({
           node={selectedNode}
           edge={selectedEdge}
           nodes={nodes}
+          catalogue={catalogue}
           onUpdate={updateStep}
           onDeleteStep={deleteStep}
           onDeleteLink={deleteLink}
@@ -540,6 +789,7 @@ function Inspector({
   node,
   edge,
   nodes,
+  catalogue,
   onUpdate,
   onDeleteStep,
   onDeleteLink,
@@ -548,6 +798,7 @@ function Inspector({
   node: StepNode | null;
   edge: Edge | null;
   nodes: StepNode[];
+  catalogue: Map<string, McpTool>;
   onUpdate: (id: string, patch: Partial<StepData> & { kind?: StepKind }) => void;
   onDeleteStep: (id: string) => void;
   onDeleteLink: (id: string) => void;
@@ -587,7 +838,8 @@ function Inspector({
         <h3 className="text-[13px] font-semibold text-neutral-900">Nothing selected</h3>
         <p className="mt-1.5 text-[13px] leading-relaxed text-neutral-500">
           Pick a step to rename it, change its kind or set what a call costs. Drag from a
-          step&rsquo;s right edge to the next one to wire them together.
+          step&rsquo;s right edge to the next one to wire them together, and Delete removes
+          whatever is selected.
         </p>
         <ul className="mt-4 space-y-1.5">
           {nodes.map((n) => {
@@ -613,6 +865,10 @@ function Inspector({
 
   const step = node;
   const k = STEP_KINDS[step.type];
+  const tool = step.data.tool ? catalogue.get(step.data.tool) : undefined;
+  // Nothing converts *into* an MCP step — those arrive from the palette with a
+  // tool attached — but one that is already MCP can be converted away.
+  const kinds = step.type === "mcp" ? [...KIND_ORDER, "mcp" as StepKind] : KIND_ORDER;
 
   function commitPrice(next: string) {
     setPrice(next);
@@ -625,13 +881,23 @@ function Inspector({
     onUpdate(step.id, { price: n });
   }
 
+  /** Swapping the tool carries its price over, and its name too unless the step
+   *  has been renamed by hand. */
+  function commitTool(id: string) {
+    const next = catalogue.get(id);
+    if (!next) return;
+    const renamed = !!tool && step.data.name !== tool.name;
+    setPrice(next.price != null ? usd(next.price, 3) : "");
+    onUpdate(step.id, { tool: id, price: next.price, name: renamed ? step.data.name : next.name });
+  }
+
   return (
     <aside className={shell}>
       <div className="flex items-center gap-2">
         <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md", k.chip)}>
           <k.Icon size={13} />
         </span>
-        <h3 className="text-[13px] font-semibold text-neutral-900">Step</h3>
+        <h3 className="text-[13px] font-semibold text-neutral-900">{step.type === "mcp" ? "MCP step" : "Step"}</h3>
       </div>
 
       <label className="mt-4 block">
@@ -651,28 +917,80 @@ function Inspector({
           onChange={(e) => onUpdate(step.id, { kind: e.target.value as StepKind })}
           className="mt-1.5 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-[13.5px] outline-none focus:border-neutral-400"
         >
-          {KIND_ORDER.map((k) => (
-            <option key={k} value={k}>
-              {STEP_KINDS[k].label}
+          {kinds.map((kind) => (
+            <option key={kind} value={kind}>
+              {STEP_KINDS[kind].label}
             </option>
           ))}
         </select>
       </label>
 
-      {step.type === "call" && (
+      {step.type === "mcp" && (
+        <>
+          <label className="mt-3 block">
+            <span className="text-[12.5px] font-medium text-neutral-700">Tool</span>
+            <select
+              value={tool?.id ?? ""}
+              onChange={(e) => commitTool(e.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-[13.5px] outline-none focus:border-neutral-400"
+            >
+              {!tool && <option value="">{step.data.tool ?? "No tool"} — not attached</option>}
+              {[...catalogue.values()].map((t) => (
+                <option key={t.id} value={t.id}>
+                  {MCP_CATEGORIES[t.category].label} · {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {tool ? (
+            <div className="mt-3">
+              <p className="text-[12.5px] leading-relaxed text-neutral-500">{tool.description}</p>
+              <p className="mt-1.5 font-mono text-[11.5px] text-neutral-400">{tool.id}</p>
+              {tool.inputs.length > 0 ? (
+                <dl className="mt-2.5 space-y-1 border-t border-black/[0.06] pt-2.5">
+                  {tool.inputs.map((input) => (
+                    <div key={input.name} className="flex items-baseline gap-2 text-[12px]">
+                      <dt className="font-mono text-neutral-700">{input.name}</dt>
+                      <dd className="ml-auto text-neutral-400">
+                        {input.type}
+                        {input.required ? " · required" : ""}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                <p className="mt-2.5 border-t border-black/[0.06] pt-2.5 text-[12px] text-neutral-400">
+                  Takes no arguments.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-3 text-[12.5px] leading-relaxed text-rose-600">
+              The server this tool came from is no longer attached. Pick another tool, or
+              reconnect it from the palette.
+            </p>
+          )}
+        </>
+      )}
+
+      {(step.type === "call" || step.type === "mcp") && (
         <label className="mt-3 block">
           <span className="text-[12.5px] font-medium text-neutral-700">Price (USDC)</span>
           <input
             value={price}
             onChange={(e) => commitPrice(e.target.value)}
             inputMode="decimal"
+            placeholder="0.000"
             className="tnum mt-1.5 w-full rounded-lg border border-black/10 px-3 py-2 text-[13.5px] outline-none focus:border-neutral-400"
           />
           {err ? (
             <span className="mt-1.5 block text-[12px] text-rose-600">{err}</span>
           ) : (
             <span className="mt-1.5 block text-[12px] leading-relaxed text-neutral-400">
-              Charged per run, quoted back to the caller as HTTP 402.
+              {step.type === "mcp"
+                ? "What this tool charges per call. Free tools leave it at zero."
+                : "Charged per run, quoted back to the caller as HTTP 402."}
             </span>
           )}
         </label>

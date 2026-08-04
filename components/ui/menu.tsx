@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 // Lightweight dropdown menu: a trigger + a floating panel that closes on
 // outside-click or Escape. No external dependency — used for every menu in the
 // app (org switcher, user menu, model selector, project menu, etc.).
+
+// Picking an item dismisses the menu. Passed down rather than left to each call
+// site: outside-click cannot do it (the item is inside the panel), so a menu
+// whose item opened a dialog would otherwise stay up behind it. The default is a
+// no-op so a <MenuItem> rendered outside a <Menu> still works.
+const MenuClose = createContext<() => void>(() => {});
+
 export function Menu({
   trigger,
   children,
@@ -54,7 +61,9 @@ export function Menu({
             panelClassName
           )}
         >
-          {typeof children === "function" ? children(close) : children}
+          <MenuClose.Provider value={close}>
+            {typeof children === "function" ? children(close) : children}
+          </MenuClose.Provider>
         </div>
       )}
     </div>
@@ -74,10 +83,16 @@ export function MenuItem({
   danger?: boolean;
   shortcut?: string;
 }) {
+  const close = useContext(MenuClose);
   return (
     <button
       role="menuitem"
-      onClick={onClick}
+      onClick={() => {
+        // Closed first, so an item that opens a dialog does not leave the panel
+        // hanging behind the scrim.
+        close();
+        onClick?.();
+      }}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors",
         danger
