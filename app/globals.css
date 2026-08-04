@@ -154,6 +154,37 @@ a:focus-visible,
 /* Live figures must not reflow as they change. */
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
+/* ---------- Mission Control ----------
+   Its own palette, because it is an observatory and the rest of the app is a
+   workspace. Ink is a blue-black dome, gold is value, mint is health, and
+   nothing else gets a colour. See lib/mission/palette.ts for the canvas half of
+   the same tokens — the two must stay in step. */
+
+@theme inline {
+  --color-ink: #070a10;
+  --color-gold: #e8b65a;
+  --color-mint: #9ee6c8;
+  --color-frost: #e8edf7;
+  --color-haze: #6b7a93;
+  --font-plex: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Breathes rather than blinks. A blink on a dashboard reads as an alarm. */
+@keyframes missionPulse {
+  0%, 100% { opacity: 0.28; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(2.2); }
+}
+
+/* One pass over a settlement row as it lands, then gone. */
+@keyframes missionFlash {
+  from { opacity: 0.14; }
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[missionPulse_2\.4s_ease-in-out_infinite\] { animation: none; opacity: 0.6; }
+}
+
 /* ---------- React Flow, dressed to match the rest of the app ----------
    React Flow's own stylesheet is imported from a component module, so it lands
    after globals.css and wins on equal specificity. Every rule below is scoped
