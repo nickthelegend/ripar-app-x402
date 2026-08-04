@@ -2,9 +2,21 @@
 // file schemas — a deploy panel that prints something close-but-wrong costs more
 // time than one that prints nothing.
 
-import type { Endpoint } from "./app-data";
-
 export type DeployTargetId = "railway" | "render" | "fly" | "heroku" | "docker";
+
+/**
+ * Everything a deploy plan needs from an endpoint, and nothing else — so the
+ * panel can be handed an endpoint read from a live agent manifest without a
+ * cast. `price` is nullable because a manifest states it as a display string
+ * ("$0.01") and not every one of those parses to a number.
+ */
+export type DeployEndpoint = {
+  name: string;
+  /** The route the handler serves, without a leading slash: "api/summarize". */
+  slug: string;
+  /** USDC per request, or null when the manifest's price did not parse. */
+  price: number | null;
+};
 
 export type DeployTarget = {
   id: DeployTargetId;
@@ -32,16 +44,18 @@ export type DeployBlock = {
 };
 
 /** Slugs carry a slash ("algo-usd/spot"); host app names cannot. */
-const appNameFor = (e: Pick<Endpoint, "slug">) =>
+const appNameFor = (e: Pick<DeployEndpoint, "slug">) =>
   `ripar-${e.slug.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}`;
 
 export function deployPlan(
   target: DeployTargetId,
-  endpoint: Pick<Endpoint, "name" | "slug" | "price">,
+  endpoint: DeployEndpoint,
   payout: string
 ): DeployBlock[] {
   const app = appNameFor(endpoint);
-  const price = endpoint.price.toFixed(3);
+  // A price we could not read stays an obvious blank. A command carrying an
+  // invented figure is worse than one the operator has to finish by hand.
+  const price = endpoint.price == null ? "<price-in-usdc>" : endpoint.price.toFixed(3);
   const { slug } = endpoint;
 
   switch (target) {

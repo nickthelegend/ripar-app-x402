@@ -5,7 +5,7 @@ import { Menu as MenuIcon, X } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { useDialogStack } from "@/components/ui/dialog-stack";
 import { cn } from "@/lib/utils";
-import { AGENTS, ENDPOINTS, WORKFLOWS } from "@/lib/app-data";
+import { shortAddr, useWorkspace } from "@/lib/real-data";
 import { shortAddress } from "@/lib/algorand-address";
 import { useSettings } from "@/lib/settings";
 import { NAV, Sidebar, type View } from "./sidebar";
@@ -118,9 +118,9 @@ export function AppShell() {
   );
 }
 
-/** ⌘K across every surface, its entries built from the real data. Mounted only
- *  while it is open, so closing it drops the query and the highlight without an
- *  effect having to reach back in and reset them. */
+/** ⌘K across every surface, its entries built from the real workspace. Mounted
+ *  only while it is open, so closing it drops the query and the highlight
+ *  without an effect having to reach back in and reset them. */
 function Palette({ onClose, onGo }: { onClose: () => void; onGo: (v: View) => void }) {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -129,18 +129,42 @@ function Palette({ onClose, onGo }: { onClose: () => void; onGo: (v: View) => vo
   // anywhere but the field navigates the page behind it. ⌘K still closes it —
   // that branch runs ahead of the dialog check.
   useDialogStack(true);
+  const { data, status } = useWorkspace();
 
-  const entries = [
+  const navigation = [
     // Driven off NAV so a new surface reaches the palette by being navigable.
     ...NAV.map((n) => ({ label: n.label, hint: "Go to", run: () => onGo(n.id) })),
     // Settings lives in the account menu rather than the rail, so it is listed here.
     { label: "Settings", hint: "Go to", run: () => onGo("settings") },
-    ...ENDPOINTS.map((e) => ({ label: e.name, hint: `Endpoint · /${e.slug}`, run: () => onGo("endpoints") })),
-    ...WORKFLOWS.map((w) => ({ label: w.name, hint: "Workflow", run: () => onGo("workflows") })),
-    ...AGENTS.map((a) => ({ label: a.name, hint: `Agent · @${a.handle}`, run: () => onGo("agents") })),
   ];
+
+  // Only things this workspace actually has. Endpoints come from the agent's own
+  // manifest and agents are addresses that have really been paid, so selecting
+  // one lands on a row that is there. Workflows are absent on purpose: they are
+  // drafts held by the Workflows view for the session, and there is no stored
+  // list for the palette to read.
+  const workspace = [
+    ...(data?.endpoints ?? []).map((e) => ({
+      label: e.name,
+      hint: `Endpoint · ${e.path}`,
+      run: () => onGo("endpoints"),
+    })),
+    ...(data?.agents ?? []).map((a) => ({
+      label: shortAddr(a.address, 10, 6),
+      hint: a.mine ? "Agent · yours" : `Agent · paid ${a.calls}×`,
+      run: () => onGo("agents"),
+    })),
+  ];
+
+  const entries = [...navigation, ...workspace];
   const term = q.trim().toLowerCase();
   const results = (term ? entries.filter((e) => `${e.label} ${e.hint}`.toLowerCase().includes(term)) : entries).slice(0, 9);
+  const note =
+    status === "loading"
+      ? "Reading the agent manifest and the chain…"
+      : workspace.length === 0
+        ? "Nothing else to jump to yet — endpoints appear once the agent publishes a manifest, agents once somebody has been paid."
+        : null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-start justify-center bg-neutral-900/25 px-4 pt-[12vh] backdrop-blur-sm" onClick={onClose}>
@@ -174,6 +198,11 @@ function Palette({ onClose, onGo }: { onClose: () => void; onGo: (v: View) => vo
             </li>
           ))}
         </ul>
+        {note && !term && (
+          <p className="border-t border-black/[0.06] px-4 py-2.5 text-[12px] leading-relaxed text-neutral-400">
+            {note}
+          </p>
+        )}
       </div>
     </div>
   );

@@ -20,7 +20,7 @@ export function SettingsView() {
     <>
       <PageHead
         title="Settings"
-        subtitle="Who you are, where settlement pays, what this workspace is allowed to spend, and the keys that can call it."
+        subtitle="Who you are, where settlement pays, what you intend this workspace to spend, and the keys that can call it."
       />
       <div className="space-y-4">
         <ProfileSection key={`${s.name}|${s.email}|${s.org}`} saved={{ name: s.name, email: s.email, org: s.org }} />
@@ -245,10 +245,12 @@ function PayoutSection({ saved }: { saved: string }) {
 
 type CapDraft = { enabled: boolean; perCall: string; daily: string; monthly: string };
 
+// Worded as intent, not as enforcement: nothing in this app reads these numbers
+// before a payment, because this app never signs one. See the notice below.
 const CAP_FIELDS: { key: keyof Omit<CapDraft, "enabled">; label: string; hint: string }[] = [
-  { key: "perCall", label: "Per call", hint: "Refuse any single quote above this." },
-  { key: "daily", label: "Per day", hint: "Rolling 24 hours, resets on the hour." },
-  { key: "monthly", label: "Per calendar month", hint: "Hard stop until the first." },
+  { key: "perCall", label: "Per call", hint: "The most a single quote should ever be." },
+  { key: "daily", label: "Per day", hint: "The most a rolling 24 hours should add up to." },
+  { key: "monthly", label: "Per calendar month", hint: "The most a calendar month should add up to." },
 ];
 
 function CapsSection({ saved }: { saved: SpendCaps }) {
@@ -281,34 +283,50 @@ function CapsSection({ saved }: { saved: SpendCaps }) {
 
     setErr({});
     saveSettings({ caps: { enabled: draft.enabled, ...next } });
-    toast(draft.enabled ? "Spend caps saved" : "Spend caps saved and turned off", "success");
+    toast(draft.enabled ? "Spend caps saved on this device" : "Spend caps saved and turned off", "success");
   }
 
   return (
     <Section
       title="Spend caps"
-      description="Ceilings on what this workspace may pay out to other endpoints and agents. A quote above a cap is refused before any payment is signed, so a runaway loop stops at the cap rather than at the balance."
+      description="What you intend this workspace to be allowed to pay out to other endpoints and agents. Recorded as a preference — read the note below before relying on it."
       footer={
         <>
           <SaveButton disabled={!dirty} onClick={save}>Save caps</SaveButton>
           <span className="text-[12px] text-neutral-400">
             {draft.enabled
-              ? `Refusing anything over ${usd(Number(draft.perCall) || 0, 2)} USDC a call`
-              : "Caps are off — outbound spend is unlimited"}
+              ? `Intending a ${usd(Number(draft.perCall) || 0, 2)} USDC ceiling per call — not enforced`
+              : "No caps set"}
           </span>
         </>
       }
     >
+      {/* The control used to say a quote above a cap was refused before payment.
+          Nothing does that: these numbers live in this browser's localStorage and
+          no code path reads them, because this app does not sign outbound
+          payments — a caller's own wallet does, wherever it runs. Saying so is
+          the only honest option short of building the spender that would obey
+          them. */}
+      <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+        <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+        <p className="text-[12.5px] leading-relaxed text-amber-900">
+          <span className="font-medium">These caps are not enforced yet.</span> They are stored on
+          this device as a preference and nothing consults them: no payment is signed from this app,
+          so there is no request path to refuse. Treat them as a note to yourself, not as a limit
+          that will stop a runaway loop.
+        </p>
+      </div>
+
       <div className="flex items-center justify-between gap-4 rounded-lg border border-black/[0.08] px-3.5 py-3">
         <span>
-          <span className="block text-[13px] font-medium text-neutral-900">Enforce caps</span>
-          <span className="block text-[12px] text-neutral-500">Turning this off removes every ceiling below.</span>
+          <span className="block text-[13px] font-medium text-neutral-900">Record caps</span>
+          <span className="block text-[12px] text-neutral-500">Turning this off clears the intended ceilings below.</span>
         </span>
         <button
           type="button"
           role="switch"
           aria-checked={draft.enabled}
-          aria-label="Enforce spend caps"
+          aria-label="Record spend caps"
           onClick={() => setDraft((d) => ({ ...d, enabled: !d.enabled }))}
           className={cn(
             "relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors",

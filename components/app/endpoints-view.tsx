@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { Check, Copy, ExternalLink, Rocket } from "lucide-react";
 import { SlideOver } from "@/components/ui/slide-over";
+import { MANIFEST_PATH } from "@/lib/agent-origin";
+import type { DeployEndpoint } from "@/lib/deploy-targets";
 import { AGENT_ORIGIN, useWorkspace, type RealEndpoint } from "@/lib/real-data";
 import { EmptyState, Metric, PageHead, Sheet, StatusPill } from "./bits";
 import { DeployModal } from "./deploy-modal";
-import { TestConsole } from "./test-console";
 
 const usd = (n: number, d = 2) =>
   n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -20,9 +21,11 @@ export function EndpointsView() {
   const { data, status, error } = useWorkspace();
   const [open, setOpen] = useState<RealEndpoint | null>(null);
   const [deploying, setDeploying] = useState<RealEndpoint | null>(null);
-  const [testing, setTesting] = useState<RealEndpoint | null>(null);
 
   const endpoints = data?.endpoints ?? [];
+  // The snippet quotes a route the agent actually publishes rather than a path
+  // we assume it has.
+  const sample = endpoints[0];
 
   return (
     <>
@@ -35,7 +38,7 @@ export function EndpointsView() {
         }
         actions={
           <a
-            href={`${AGENT_ORIGIN}/.well-known/ripar.json`}
+            href={`${AGENT_ORIGIN}${MANIFEST_PATH}`}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 py-1.5 text-[13px] font-medium text-neutral-700 transition-colors hover:border-black/20"
@@ -66,24 +69,25 @@ export function EndpointsView() {
               <Metric label="Endpoints live" value={String(endpoints.length)} />
             </div>
             <div className="bg-white px-4 py-4">
-              <Metric label="Paid calls received" value={String(data.mine.calls)} hint="to your payout address" />
+              <Metric label="Paid calls received" value={String(data.mine.calls)} hint="across every endpoint" />
             </div>
             <div className="bg-white px-4 py-4">
-              <Metric label="Earned" value={usd(data.mine.earnedUsdc)} unit="USDC" />
+              <Metric label="Earned" value={usd(data.mine.earnedUsdc)} unit="USDC" hint="across every endpoint" />
             </div>
           </div>
 
+          {/* No per-endpoint call count or revenue column. A settlement names the
+              address it paid, not the route that earned it, so the only honest
+              place for those figures is the agent-wide row above. */}
           <Sheet>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[820px] text-[13.5px]">
+              <table className="w-full min-w-[620px] text-[13.5px]">
                 <thead className="border-b border-black/[0.07] text-[12px] text-neutral-400">
                   <tr>
                     <th scope="col" className="px-3 py-2 text-left font-medium">Endpoint</th>
                     <th scope="col" className="px-3 py-2 text-left font-medium">Status</th>
                     <th scope="col" className="px-3 py-2 text-left font-medium">Method</th>
                     <th scope="col" className="px-3 py-2 text-right font-medium">Price</th>
-                    <th scope="col" className="px-3 py-2 text-right font-medium">Paid calls</th>
-                    <th scope="col" className="px-3 py-2 text-right font-medium">Earned</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -96,14 +100,12 @@ export function EndpointsView() {
                       <td className="px-3 py-2.5">
                         <span className="block font-medium text-neutral-900">{e.name}</span>
                         <span className="block truncate font-mono text-[11.5px] text-neutral-400">
-                          {e.url.replace(AGENT_ORIGIN, "")}
+                          {e.path}
                         </span>
                       </td>
                       <td className="px-3 py-2.5"><StatusPill status="live" /></td>
                       <td className="px-3 py-2.5 font-mono text-[12px] text-neutral-500">{e.method}</td>
                       <td className="tnum px-3 py-2.5 text-right">{e.price}</td>
-                      <td className="tnum px-3 py-2.5 text-right text-neutral-600">{e.calls}</td>
-                      <td className="tnum px-3 py-2.5 text-right font-medium">{usd(e.earnedUsdc)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -111,30 +113,51 @@ export function EndpointsView() {
             </div>
           </Sheet>
 
-          {data.mine.calls === 0 && (
-            <p className="mt-2.5 text-[12px] text-neutral-400">
-              Zero paid calls so far, and it stays zero until somebody actually pays. The endpoint is
-              live and quoting — try it yourself with{" "}
-              <code className="rounded bg-black/[0.04] px-1 py-px font-mono text-[11.5px]">
-                curl -X POST {AGENT_ORIGIN}/api/summarize -d &apos;&#123;&quot;text&quot;:&quot;…&quot;&#125;&apos;
-              </code>
-              .
-            </p>
-          )}
+          <p className="mt-2.5 text-[12px] leading-relaxed text-neutral-400">
+            Paid calls and earnings are counted per agent, not per endpoint: an x402 settlement is a
+            USDC transfer to the payout address, and the transfer does not carry the name of the route
+            that was called. A per-endpoint figure would be a guess, so there is not one here.
+            {data.mine.calls === 0 && sample && (
+              <>
+                {" "}
+                Nothing has been paid yet, and it stays at zero until somebody actually pays — try it
+                yourself with{" "}
+                <code className="rounded bg-black/[0.04] px-1 py-px font-mono text-[11.5px]">
+                  curl -X POST {AGENT_ORIGIN}
+                  {sample.path} -d &apos;&#123;&quot;text&quot;:&quot;…&quot;&#125;&apos;
+                </code>
+                .
+              </>
+            )}
+          </p>
         </>
       )}
 
       <SlideOver open={!!open} onClose={() => setOpen(null)} title={open?.name ?? ""} width="max-w-lg">
-        {open && <Detail e={open} onDeploy={() => { setDeploying(open); setOpen(null); }} onTest={() => { setTesting(open); setOpen(null); }} />}
+        {open && <Detail e={open} onDeploy={() => { setDeploying(open); setOpen(null); }} />}
       </SlideOver>
 
-      {deploying && <DeployModal endpoint={deploying as never} open onClose={() => setDeploying(null)} />}
-      {testing && <TestConsole endpoint={testing as never} open onClose={() => setTesting(null)} />}
+      {/* No cast: the modal asks for the three things a deploy plan needs, and a
+          manifest endpoint carries all three. */}
+      {deploying && (
+        <DeployModal endpoint={deployShape(deploying)} open onClose={() => setDeploying(null)} />
+      )}
     </>
   );
 }
 
-function Detail({ e, onDeploy, onTest }: { e: RealEndpoint; onDeploy: () => void; onTest: () => void }) {
+/**
+ * A manifest endpoint, as the deploy plan needs it. The slug is the published
+ * route without its leading slash — the identifier the handler is configured
+ * with, taken from what the agent actually serves rather than invented here.
+ */
+const deployShape = (e: RealEndpoint): DeployEndpoint => ({
+  name: e.name,
+  slug: e.path.replace(/^\/+/, ""),
+  price: e.priceUsdc,
+});
+
+function Detail({ e, onDeploy }: { e: RealEndpoint; onDeploy: () => void }) {
   const [copied, setCopied] = useState(false);
   const snippet = `curl -X POST ${e.url} \\\n  -H 'content-type: application/json' \\\n  -d '{"text":"…"}'`;
 
@@ -163,10 +186,11 @@ function Detail({ e, onDeploy, onTest }: { e: RealEndpoint; onDeploy: () => void
         </a>
       </div>
 
+      {/* Price and method are what the manifest states about this route. What it
+          has earned is not here because it is not knowable per route — see the
+          note under the table. */}
       <div className="grid grid-cols-2 gap-5 border-t border-black/[0.07] pt-5">
         <Metric label="Price" value={e.price} unit="per request" />
-        <Metric label="Paid calls" value={String(e.calls)} />
-        <Metric label="Earned" value={usd(e.earnedUsdc)} unit="USDC" />
         <Metric label="Method" value={e.method} />
       </div>
 
@@ -192,9 +216,6 @@ function Detail({ e, onDeploy, onTest }: { e: RealEndpoint; onDeploy: () => void
       </div>
 
       <div className="flex gap-2 border-t border-black/[0.07] pt-5">
-        <button type="button" onClick={onTest} className="rounded-lg border border-black/10 px-3 py-1.5 text-[13px] font-medium text-neutral-700 hover:border-black/20">
-          Test console
-        </button>
         <button type="button" onClick={onDeploy} className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-neutral-800">
           <Rocket size={13} /> Deploy another
         </button>

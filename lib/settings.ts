@@ -16,9 +16,15 @@ export type ApiKey = {
   lastUsed: string | null;
 };
 
+/**
+ * Intended ceilings on outbound spend, kept on the device. Nothing reads them
+ * before a payment: this app never signs one, so there is no request path to
+ * refuse. Stated as such in the UI — if a spender is ever built here, this is
+ * the shape it should obey, and the notice in the settings view comes out.
+ */
 export type SpendCaps = {
   enabled: boolean;
-  perCall: number; // USDC, ceiling for a single outbound paid call
+  perCall: number; // USDC, intended ceiling for a single outbound paid call
   daily: number; // USDC
   monthly: number; // USDC
 };

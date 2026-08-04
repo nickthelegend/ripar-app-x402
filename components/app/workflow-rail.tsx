@@ -1,8 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { type Workflow } from "@/lib/app-data";
-import { StatusPill } from "./bits";
+import { costOfSteps, usd, type Workflow } from "@/lib/app-data";
 
 /** The builder's left rail: every workflow in the workspace, so switching does
  *  not mean going back to the list first. It shares its column with the tool
@@ -66,10 +65,14 @@ export function WorkflowRail({
                     >
                       {w.name}
                     </span>
+                    {/* No status pill: a workflow here is never armed or live,
+                        so what the chain costs is the fact worth carrying. */}
                     <span className="mt-0.5 flex items-baseline gap-1.5">
-                      <StatusPill status={w.status} className="text-[11px]" />
-                      <span className="tnum ml-auto text-[11px] text-neutral-400">
+                      <span className="tnum text-[11px] text-neutral-400">
                         {w.steps.length} {w.steps.length === 1 ? "step" : "steps"}
+                      </span>
+                      <span className="tnum ml-auto text-[11px] text-neutral-400">
+                        {usd(costOfSteps(w.steps), 3)} USDC
                       </span>
                     </span>
                   </button>

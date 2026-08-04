@@ -38,18 +38,23 @@ export type Step = {
   tool?: string;
 };
 
+/**
+ * A workflow the builder can open. Deliberately carries no telemetry — no run
+ * count, no success rate, no "last run". These four are templates that have
+ * never executed anywhere, and nothing in this app schedules a workflow, so any
+ * such figure would be invented. What a run costs is not stored either: it is
+ * the sum of the chain's step prices, which cannot drift from the chain.
+ */
 export type Workflow = {
   id: string;
   name: string;
   summary: string;
-  status: Status;
   trigger: string;
-  runs24h: number;
-  lastRun: string;
-  costPerRun: number;
-  successRate: number;
   steps: Step[];
 };
+
+/** What one pass down the chain quotes, in USDC. */
+export const costOfSteps = (steps: Step[]) => steps.reduce((sum, s) => sum + (s.price ?? 0), 0);
 
 export type Agent = {
   id: string;
@@ -88,14 +93,16 @@ export const ENDPOINTS: Endpoint[] = [
   { id: "ep_7e02", name: "Sanctions Check", slug: "compliance/sanctions", summary: "Screens an address against published lists.", status: "error", price: 0.02, calls24h: 44, callsTotal: 8120, earned: 162.4, p50: 5400, successRate: 0.72, listed: false, tags: ["compliance"], updated: "12 min ago" },
 ];
 
+/** Starter chains for the builder. Each describes a shape worth building; none
+ *  of them has ever run, here or anywhere else. */
 export const WORKFLOWS: Workflow[] = [
-  { id: "wf_8c21", name: "Liquidation Guard", summary: "Watches a Folks Finance position and tops up collateral before it breaches.", status: "live", trigger: "cron · every 5m", runs24h: 288, lastRun: "3 min ago", costPerRun: 0.02, successRate: 0.997,
+  { id: "wf_8c21", name: "Liquidation Guard", summary: "Watches a Folks Finance position and tops up collateral before it breaches.", trigger: "cron · every 5m",
     steps: [{ name: "cron 5m", kind: "trigger" }, { name: "read health", kind: "call", price: 0.02 }, { name: "health < 1.4", kind: "condition" }, { name: "supply collateral", kind: "action" }] },
-  { id: "wf_3f70", name: "Treasury Sweep", summary: "Moves idle USDC into the yield vault once a floor is cleared.", status: "live", trigger: "cron · hourly", runs24h: 24, lastRun: "41 min ago", costPerRun: 0.03, successRate: 1,
+  { id: "wf_3f70", name: "Treasury Sweep", summary: "Moves idle USDC into the yield vault once a floor is cleared.", trigger: "cron · hourly",
     steps: [{ name: "cron 1h", kind: "trigger" }, { name: "read balance", kind: "call", price: 0.03 }, { name: "balance > 500", kind: "condition" }, { name: "deposit", kind: "action" }] },
-  { id: "wf_5a12", name: "Feed Watchdog", summary: "Re-publishes the price feed if a quote goes stale.", status: "paused", trigger: "onchain · Swap", runs24h: 0, lastRun: "2 d ago", costPerRun: 0.01, successRate: 0.981,
+  { id: "wf_5a12", name: "Feed Watchdog", summary: "Re-publishes the price feed if a quote goes stale.", trigger: "onchain · Swap",
     steps: [{ name: "on Swap", kind: "trigger" }, { name: "read quote age", kind: "call", price: 0.01 }, { name: "age > 60s", kind: "condition" }, { name: "republish", kind: "action" }] },
-  { id: "wf_9b44", name: "Invoice Reconciler", summary: "Matches incoming USDC against open invoices each morning.", status: "draft", trigger: "cron · daily 09:00", runs24h: 0, lastRun: "never", costPerRun: 0.08, successRate: 0,
+  { id: "wf_9b44", name: "Invoice Reconciler", summary: "Matches incoming USDC against open invoices each morning.", trigger: "cron · daily 09:00",
     steps: [{ name: "cron daily", kind: "trigger" }, { name: "fetch receipts", kind: "call", price: 0.08 }, { name: "unmatched > 0", kind: "condition" }, { name: "Post message", kind: "mcp", tool: "slack.post_message" }] },
 ];
 
@@ -138,37 +145,10 @@ export const SAMPLE_CALLERS = [
   "3BKQNHKMOVA6FXGDSNXNKEEA3WYHDLV275RECAW2CXGOJ3Q4PE66FJO3PM",
 ];
 
-/** What a call to each endpoint looks like going in and coming back. Used by the
- *  test console, so the bodies have to be the real shape, not lorem. */
-export const SAMPLE_IO: Record<string, { request: unknown; result: unknown }> = {
-  "algo-usd/spot": {
-    request: { pair: "ALGO/USD" },
-    result: { pair: "ALGO/USD", price: 0.2417, round: 48_210_556, sources: 7, signature: "ed25519:9f2c41a…d70b" },
-  },
-  "wallet-risk/score": {
-    request: { address: "Y354WNZCMZ7AZ2BBQN3YCWUXOU6WDAGLUMVZ2GJQ5BG4IK5MJIBRH3NXMU" },
-    result: { band: "low", score: 12, signals: ["age>2y", "no-mixer-hops", "no-sanctioned-counterparty"], checkedRound: 48_210_556 },
-  },
-  "extract/pdf-table": {
-    request: { url: "https://example.com/invoice-2026-07.pdf", pages: "1-2" },
-    result: { rows: 14, columns: ["date", "description", "qty", "unit", "total"], confidence: 0.96 },
-  },
-  "nft/rarity": {
-    request: { assetId: 1_284_444_102 },
-    result: { rank: 318, of: 10_000, rarestTrait: "background/aurora", traitScore: 41.7 },
-  },
-  "text/summarize": {
-    request: { text: "…up to 20,000 characters of source text…" },
-    result: { summary: "A 280-character digest of the payload.", characters: 268 },
-  },
-  "compliance/sanctions": {
-    request: { address: "2TKQXNZ6L34BCJJIY5F7NRXMWL4Z2Y3QMCY3OMG6EKOGLSI4R6IBVFWYGY" },
-    result: { match: false, listsChecked: ["OFAC-SDN", "EU-CFSP", "UK-HMT"], listVersion: "2026-08-01" },
-  },
-};
-
-export const sampleIoFor = (slug: string) =>
-  SAMPLE_IO[slug] ?? { request: {}, result: { ok: true } };
+// The sample request/response bodies that used to live here fed the endpoint
+// test console. That console was removed: it invented a response for whatever
+// endpoint it was pointed at, and the Endpoints view already carries a curl
+// snippet that gets a real 402 out of the live agent.
 
 /* ── derived summaries ─────────────────────────────────────────────────── */
 

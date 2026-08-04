@@ -4,8 +4,12 @@ import { useMemo, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { cn } from "@/lib/utils";
-import type { Endpoint } from "@/lib/app-data";
-import { DEPLOY_TARGETS, deployPlan, type DeployTargetId } from "@/lib/deploy-targets";
+import {
+  DEPLOY_TARGETS,
+  deployPlan,
+  type DeployEndpoint,
+  type DeployTargetId,
+} from "@/lib/deploy-targets";
 import { useSettings } from "@/lib/settings";
 import { BRAND_MARKS } from "./brand-marks";
 import { CodeBlock } from "./bits";
@@ -20,7 +24,7 @@ export function DeployModal({
   open,
   onClose,
 }: {
-  endpoint: Endpoint | null;
+  endpoint: DeployEndpoint | null;
   open: boolean;
   onClose: () => void;
 }) {
@@ -95,6 +99,14 @@ export function DeployModal({
               <span className="font-mono text-[11.5px]">RIPAR_PAYOUT</span> is the address settlement pays
               — change it under Settings and these commands change with it. Ripar never runs the deploy
               for you; nothing above has been executed.
+              {endpoint.price == null && (
+                <>
+                  {" "}
+                  The manifest states this endpoint&apos;s price in a form we could not read as a number,
+                  so <span className="font-mono text-[11.5px]">RIPAR_PRICE_USDC</span> is left blank for
+                  you to fill in rather than guessed.
+                </>
+              )}
             </p>
             <a
               href={chosen.docs}

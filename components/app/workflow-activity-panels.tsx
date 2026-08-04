@@ -92,8 +92,9 @@ export function RunsPanel({ runs }: { runs: WorkflowRun[] }) {
         </tbody>
       </table>
       <p className={NOTE}>
-        A run here walks the chain in this browser. The cost is what those steps quote — money
-        moves when the workflow is armed and its trigger fires, not when you press Run.
+        A run here walks the chain in this browser and is recorded on this device. The cost is what
+        those steps quote, not what anything paid: no USDC has moved, and nothing schedules this
+        chain to run on its own.
       </p>
     </>
   );

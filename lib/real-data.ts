@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AGENT_ORIGIN, MANIFEST_ROUTE } from "./agent-origin";
 
 /**
  * The workspace's real data layer.
@@ -18,9 +19,8 @@ const INDEXER = "https://mainnet-idx.algonode.cloud";
 const FEE_PAYER = "ZMFK2OI7ZBD2U27ISERZC4S6LKM6WMFJPZQ4MYNJDZ2VNBNMBA67RA22AA";
 const USDC = 31_566_704;
 
-/** Our own deployed agent. Overridable so a fork points at its own. */
-export const AGENT_ORIGIN =
-  process.env.NEXT_PUBLIC_RIPAR_AGENT_ORIGIN ?? "https://api.ripar.io";
+/** Re-exported so the views keep one import for the workspace's data. */
+export { AGENT_ORIGIN };
 
 export type Loadable<T> = {
   data: T | null;
@@ -50,13 +50,36 @@ export type RealEndpoint = {
   description?: string;
   url: string;
   method: string;
+  /** As the manifest states it, e.g. "$0.01" — a display string, not a number. */
   price: string;
   tags?: string[];
-  /** Settlements observed to this agent's payout address. */
-  calls: number;
-  earnedUsdc: number;
+  /** The route the caller POSTs to, e.g. "/api/summarize". */
+  path: string;
+  /**
+   * `price` parsed to USDC. Null when the manifest states it in a form we cannot
+   * read as a number — better to say so than to guess a figure that ends up in
+   * somebody's deploy config.
+   */
+  priceUsdc: number | null;
   live: boolean;
 };
+
+/** "$0.01" → 0.01. Null when there is no number in there to take. */
+function parsePrice(price: string): number | null {
+  const m = /-?\d+(?:\.\d+)?/.exec(price ?? "");
+  if (!m) return null;
+  const n = Number(m[0]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** The path, or the whole URL if it will not parse — never a fabricated route. */
+function pathOf(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url;
+  }
+}
 
 export type Manifest = {
   name: string;
@@ -175,7 +198,10 @@ export type Workspace = {
   runs: RealRun[];
   agents: RealAgent[];
   chain: { round: number | null; blockTime: number | null };
-  /** Settlements to OUR payout address specifically. */
+  /**
+   * Settlements to OUR payout address specifically. Agent-wide by necessity —
+   * a payment names the address it pays, never the endpoint it paid for.
+   */
   mine: { calls: number; earnedUsdc: number };
 };
 
@@ -196,7 +222,9 @@ export function useWorkspace(): Loadable<Workspace> {
         // The manifest is our own agent describing itself; the settlements are
         // the chain describing everyone. Neither is invented here.
         const [manifest, runs, status] = await Promise.all([
-          j<Manifest>(`${AGENT_ORIGIN}/.well-known/ripar.json`, ac.signal).catch(() => null),
+          // Through this app's own origin, not the agent's: the agent sends no
+          // CORS header, so a browser is not allowed to read it directly.
+          j<Manifest>(MANIFEST_ROUTE, ac.signal).catch(() => null),
           fetchSettlements(ac.signal),
           j<{ "last-round": number }>(`${ALGOD}/v2/status`, ac.signal),
         ]);
@@ -216,10 +244,15 @@ export function useWorkspace(): Loadable<Workspace> {
         const payTo = manifest?.payTo;
         const mineRuns = payTo ? runs.filter((r) => r.to === payTo) : [];
 
+        // No per-endpoint call count or revenue, on purpose. A settlement is a
+        // USDC transfer to the agent's payout address; it carries the payer, the
+        // amount and a note, but nothing that names which endpoint was called.
+        // The totals below are therefore agent-wide, and attributing them to a
+        // row would print the same number against every endpoint.
         const endpoints: RealEndpoint[] = (manifest?.endpoints ?? []).map((e) => ({
           ...e,
-          calls: mineRuns.length,
-          earnedUsdc: mineRuns.reduce((s2, r) => s2 + r.amountUsdc, 0),
+          path: pathOf(e.url),
+          priceUsdc: parsePrice(e.price),
           live: true,
         }));
 
