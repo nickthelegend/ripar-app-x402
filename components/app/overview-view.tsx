@@ -1,14 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUpRight, CornerDownLeft, Paperclip, Sparkles } from "lucide-react";
-import { useToast } from "@/components/ui/toast";
+import { ArrowUpRight, CornerDownLeft, ExternalLink, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  AGENTS, ENDPOINTS, RUNS, WORKFLOWS, callsThisMonth, compact, settledThisMonth, usd,
-} from "@/lib/app-data";
+import { AGENT_ORIGIN, ago, shortAddr, useWorkspace } from "@/lib/real-data";
 import type { View } from "./sidebar";
-import { Metric, PageHead, Sheet } from "./bits";
+import { EmptyState, Metric, PageHead, Sheet } from "./bits";
 
 const PROMPTS = [
   "Price my summariser at 0.01 USDC and list it",
@@ -16,21 +13,13 @@ const PROMPTS = [
   "Post a job to label 5,000 wallet addresses",
 ];
 
-const OUTCOME = {
-  ok: { dot: "bg-emerald-500", label: "ok" },
-  retried: { dot: "bg-amber-500", label: "retried" },
-  failed: { dot: "bg-rose-500", label: "failed" },
-} as const;
+const usd = (n: number, d = 2) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 
-export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: (text: string) => void }) {
+export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: (t: string) => void }) {
   const [prompt, setPrompt] = useState("");
-  const { toast } = useToast();
+  const { data, status, error } = useWorkspace();
 
-  const live = ENDPOINTS.filter((e) => e.status === "live").length;
-  const armed = WORKFLOWS.filter((w) => w.status === "live").length;
-  const working = AGENTS.filter((a) => a.status === "working" || a.status === "bidding").length;
-
-  /** The composer is a doorway — Chat is where the conversation actually lives. */
   function submit() {
     if (!prompt.trim()) return;
     onAsk(prompt.trim());
@@ -39,15 +28,18 @@ export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: 
 
   return (
     <>
-      <PageHead title="Overview" subtitle="What is earning, what is armed, and what ran recently." />
+      <PageHead
+        title="Overview"
+        subtitle="Read live from Algorand MainNet and from your deployed agent's own manifest."
+      />
 
       {/* composer */}
       <Sheet>
         <div className="bg-[radial-gradient(120%_120%_at_50%_0%,#fff7f1_0%,#ffffff_58%)] px-5 py-8 sm:px-8 sm:py-10">
           <div className="mx-auto max-w-[620px] text-center">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-black/[0.07] bg-white px-2.5 py-1 text-[11.5px] text-neutral-600 shadow-sm">
-              <span className="rounded-full bg-accent px-1.5 py-px text-[10px] font-semibold text-white">NEW</span>
-              Pay-per-request, settled in USDC
+              <span className="rounded-full bg-accent px-1.5 py-px text-[10px] font-semibold text-white">LIVE</span>
+              {data?.manifest ? `${data.manifest.handle} is serving` : "Pay-per-request, settled in USDC"}
             </span>
             <h2 className="mt-4 text-[21px] font-semibold tracking-[-0.02em] text-neutral-900 sm:text-[24px]">
               Ship a paid{" "}
@@ -69,9 +61,6 @@ export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: 
                 className="w-full resize-none bg-transparent px-1.5 py-1 text-left text-[13.5px] leading-relaxed outline-none placeholder:text-neutral-400"
               />
               <div className="mt-1.5 flex items-center gap-2 px-1">
-                <button type="button" aria-label="Attach a file" onClick={() => toast("Attachments land with the first real deploy")} className="rounded-md p-1 text-neutral-400 transition-colors hover:text-neutral-700">
-                  <Paperclip size={14} />
-                </button>
                 <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-black/10 px-2 py-0.5 text-[11.5px] font-medium text-neutral-600">
                   <Sparkles size={11} className="text-accent" /> x402
                 </span>
@@ -106,13 +95,31 @@ export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: 
         </div>
       </Sheet>
 
-      {/* the four figures that describe the account */}
+      {/* Real figures. `You have earned` stays at zero until somebody actually
+          pays — inventing a number here is precisely what we refuse to do. */}
       <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-black/[0.07] sm:grid-cols-4">
         {[
-          { label: "Settled this month", value: usd(settledThisMonth), unit: "USDC", hint: `${compact(callsThisMonth)} paid calls` },
-          { label: "Endpoints live", value: String(live), hint: `${ENDPOINTS.length} total` },
-          { label: "Workflows armed", value: String(armed), hint: `${WORKFLOWS.length} total` },
-          { label: "Agents active", value: String(working), hint: `${AGENTS.length} on the market` },
+          {
+            label: "You have earned",
+            value: data ? usd(data.mine.earnedUsdc) : "—",
+            unit: "USDC",
+            hint: data ? `${data.mine.calls} paid calls to your address` : "reading the chain…",
+          },
+          {
+            label: "Your endpoints live",
+            value: data ? String(data.endpoints.length) : "—",
+            hint: data?.manifest ? data.manifest.handle : "no manifest yet",
+          },
+          {
+            label: "Network settlements",
+            value: data ? String(data.runs.length) : "—",
+            hint: "recent x402 payments, all agents",
+          },
+          {
+            label: "MainNet round",
+            value: data?.chain.round ? data.chain.round.toLocaleString("en-US") : "—",
+            hint: data?.chain.blockTime ? `${data.chain.blockTime.toFixed(1)}s between blocks` : "measuring…",
+          },
         ].map((m) => (
           <div key={m.label} className="bg-white px-4 py-4">
             <Metric label={m.label} value={m.value} unit={m.unit} hint={m.hint} />
@@ -120,67 +127,91 @@ export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: 
         ))}
       </div>
 
-      {/* recent activity */}
+      {status === "error" && (
+        <p className="mt-3 text-[12.5px] text-rose-600">
+          Could not read the chain{error ? ` (${error})` : ""}. Nothing here is cached, so the
+          figures stop rather than drift.
+        </p>
+      )}
+
+      {/* real settlements, network-wide */}
       <div className="mt-8">
         <div className="flex items-baseline justify-between pb-3">
-          <h2 className="text-[15px] font-semibold tracking-tight text-neutral-900">Recent activity</h2>
-          <button type="button" onClick={() => onGo("endpoints")} className="inline-flex items-center gap-1 text-[12.5px] text-neutral-500 transition-colors hover:text-neutral-900">
-            All endpoints <ArrowUpRight size={13} />
-          </button>
+          <h2 className="text-[15px] font-semibold tracking-tight text-neutral-900">
+            Live x402 settlements
+          </h2>
+          <a
+            href="https://explorer.ripar.io/live"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-[12.5px] text-neutral-500 transition-colors hover:text-neutral-900"
+          >
+            Open the explorer <ArrowUpRight size={13} />
+          </a>
         </div>
+
         <Sheet>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[700px] text-[13.5px]">
-              <thead className="border-b border-black/[0.07] text-[12px] text-neutral-400">
-                <tr>
-                  <th scope="col" className="px-3 py-2 text-left font-medium">Request</th>
-                  <th scope="col" className="px-3 py-2 text-left font-medium">Target</th>
-                  <th scope="col" className="px-3 py-2 text-left font-medium">Outcome</th>
-                  <th scope="col" className="px-3 py-2 text-right font-medium">Cost</th>
-                  <th scope="col" className="px-3 py-2 text-right font-medium">Latency</th>
-                  <th scope="col" className="px-3 py-2 text-right font-medium">Settled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {RUNS.map((r) => (
-                  <tr key={r.id} className="border-b border-black/[0.05] last:border-0 hover:bg-black/[0.02]">
-                    <td className="px-3 py-2.5 font-mono text-[12px] text-neutral-500">{r.id}</td>
-                    <td className="px-3 py-2.5">
-                      <span className="text-neutral-900">{r.target}</span>
-                      <span className="ml-2 rounded bg-black/[0.04] px-1.5 py-px text-[11px] text-neutral-500">{r.kind}</span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className="inline-flex items-center gap-1.5 text-[12.5px] text-neutral-600">
-                        <span className={cn("h-1.5 w-1.5 rounded-full", OUTCOME[r.outcome].dot)} />
-                        {OUTCOME[r.outcome].label}
-                      </span>
-                    </td>
-                    <td className="tnum px-3 py-2.5 text-right">{r.cost ? usd(r.cost, 3) : "—"}</td>
-                    <td className="tnum px-3 py-2.5 text-right text-neutral-600">
-                      {r.ms >= 1000 ? `${(r.ms / 1000).toFixed(1)}s` : `${r.ms}ms`}
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      {r.tx ? (
+          {status === "loading" ? (
+            <p className="px-4 py-10 text-center text-[13px] text-neutral-400">reading the chain…</p>
+          ) : !data?.runs.length ? (
+            <EmptyState
+              title="No settlements in the current window"
+              body="This is a young protocol and quiet stretches are normal. Rows appear here when payments actually happen — none are invented to fill the gap."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-[13.5px]">
+                <thead className="border-b border-black/[0.07] text-[12px] text-neutral-400">
+                  <tr>
+                    <th scope="col" className="px-3 py-2 text-left font-medium">Amount</th>
+                    <th scope="col" className="px-3 py-2 text-left font-medium">Payer</th>
+                    <th scope="col" className="px-3 py-2 text-left font-medium">Paid to</th>
+                    <th scope="col" className="px-3 py-2 text-right font-medium">Round</th>
+                    <th scope="col" className="px-3 py-2 text-right font-medium">When</th>
+                    <th scope="col" className="px-3 py-2 text-right font-medium">Proof</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.runs.slice(0, 12).map((r) => (
+                    <tr key={r.id} className="border-b border-black/[0.05] last:border-0 hover:bg-black/[0.02]">
+                      <td className="tnum px-3 py-2.5 font-medium">{usd(r.amountUsdc, 3)} USDC</td>
+                      <td className="px-3 py-2.5 font-mono text-[12px] text-neutral-500">{shortAddr(r.from)}</td>
+                      <td className="px-3 py-2.5 font-mono text-[12px] text-neutral-500">
+                        {shortAddr(r.to)}
+                        {data.manifest && r.to === data.manifest.payTo && (
+                          <span className="ml-2 rounded bg-orange-50 px-1.5 py-px text-[10.5px] font-semibold text-accent">
+                            you
+                          </span>
+                        )}
+                      </td>
+                      <td className="tnum px-3 py-2.5 text-right text-neutral-600">
+                        {r.round.toLocaleString("en-US")}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-neutral-500">{ago(r.when)}</td>
+                      <td className="px-3 py-2.5 text-right">
                         <a
-                          href={`https://allo.info/tx/${r.tx}`}
+                          href={`https://allo.info/tx/${r.id}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="font-mono text-[12px] text-neutral-500 underline underline-offset-2 transition-colors hover:text-accent"
+                          className="inline-flex items-center gap-0.5 font-mono text-[12px] text-neutral-500 hover:text-accent"
                         >
-                          {r.tx.slice(0, 6)}…
+                          verify <ExternalLink size={10} />
                         </a>
-                      ) : (
-                        <span className="text-[12px] text-neutral-300">not charged</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Sheet>
+
         <p className="mt-2.5 text-[12px] text-neutral-400">
-          A failed call is never charged — the caller keeps their USDC and the row settles to nothing.
+          Read from Algorand MainNet via the public indexer. Your own agent is{" "}
+          <a href={AGENT_ORIGIN} target="_blank" rel="noreferrer" className="underline hover:text-neutral-700">
+            {AGENT_ORIGIN.replace("https://", "")}
+          </a>
+          .
         </p>
       </div>
     </>

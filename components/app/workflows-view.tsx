@@ -46,7 +46,10 @@ function Chain({ steps, running }: { steps: Step[]; running?: number }) {
 }
 
 export function WorkflowsView() {
-  const [items, setItems] = useState<Workflow[]>(WORKFLOWS);
+  // Starts empty on purpose. A workflow is something you build; shipping four
+  // invented ones would be the same fabrication we removed everywhere else.
+  // WORKFLOWS remains importable as starter templates via 'New workflow'.
+  const [items, setItems] = useState<Workflow[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -122,10 +125,10 @@ export function WorkflowsView() {
         actions={
           <button
             type="button"
-            onClick={() => toast("Draft workflow created — add a trigger to arm it")}
+            onClick={() => { setItems(WORKFLOWS); toast(`Loaded ${WORKFLOWS.length} starter templates — edit one in the builder`); }}
             className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-neutral-800"
           >
-            <Plus size={14} /> New workflow
+            <Plus size={14} /> Start from a template
           </button>
         }
       />

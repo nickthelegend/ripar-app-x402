@@ -1,89 +1,59 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bot, Gavel, MoreHorizontal, Pause, Play, Plus, Send } from "lucide-react";
-import { Menu, MenuItem } from "@/components/ui/menu";
-import { Modal } from "@/components/ui/modal";
+import { Bot, ExternalLink } from "lucide-react";
 import { SlideOver } from "@/components/ui/slide-over";
-import { useToast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
-import { AGENTS, usd, type Agent, type AgentStatus } from "@/lib/app-data";
-import { EmptyState, Metric, PageHead, SearchInput, Segmented, Sheet, SortHeader, StatusPill } from "./bits";
+import { ago, shortAddr, useWorkspace, type RealAgent } from "@/lib/real-data";
+import { EmptyState, Metric, PageHead, SearchInput, Segmented, Sheet, SortHeader } from "./bits";
 
-type Scope = "all" | "mine" | "hired";
-type Field = "name" | "jobsWon" | "successRate" | "earned" | "avgBid";
+type Scope = "all" | "mine";
+type Field = "address" | "calls" | "earnedUsdc" | "payers" | "medianUsdc";
 
-const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+const usd = (n: number, d = 2) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 
+/**
+ * There is no agent registry to read, so an agent here is defined by behaviour:
+ * an address that has actually received x402 settlements. That is exactly what
+ * the chain knows, and it is worth more than a directory of self-declared
+ * listings — every row is backed by somebody having really paid.
+ */
 export function AgentsView() {
-  const [agents, setAgents] = useState<Agent[]>(AGENTS);
+  const { data, status, error } = useWorkspace();
   const [scope, setScope] = useState<Scope>("all");
   const [q, setQ] = useState("");
-  const [sort, setSort] = useState<{ field: Field; dir: "asc" | "desc" }>({ field: "earned", dir: "desc" });
-  const [open, setOpen] = useState<Agent | null>(null);
-  const [posting, setPosting] = useState(false);
-  const { toast } = useToast();
+  const [sort, setSort] = useState<{ field: Field; dir: "asc" | "desc" }>({
+    field: "earnedUsdc",
+    dir: "desc",
+  });
+  const [open, setOpen] = useState<RealAgent | null>(null);
 
+  const agents = data?.agents ?? [];
   const counts = useMemo(
-    () => ({
-      all: agents.length,
-      mine: agents.filter((a) => a.mine).length,
-      hired: agents.filter((a) => !a.mine && a.jobsWon > 0).length,
-    }),
+    () => ({ all: agents.length, mine: agents.filter((a) => a.mine).length }),
     [agents]
   );
 
   const rows = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const scoped = agents.filter((a) =>
-      scope === "mine" ? a.mine : scope === "hired" ? !a.mine && a.jobsWon > 0 : true
-    );
-    const found = term
-      ? scoped.filter((a) =>
-          [a.name, a.handle, a.summary, ...a.skills].join(" ").toLowerCase().includes(term)
-        )
-      : scoped;
+    const scoped = scope === "mine" ? agents.filter((a) => a.mine) : agents;
+    const found = term ? scoped.filter((a) => a.address.toLowerCase().includes(term)) : scoped;
     const dir = sort.dir === "asc" ? 1 : -1;
     return [...found].sort((a, b) =>
-      sort.field === "name"
-        ? a.name.localeCompare(b.name) * dir
+      sort.field === "address"
+        ? a.address.localeCompare(b.address) * dir
         : ((a[sort.field] as number) - (b[sort.field] as number)) * dir
     );
   }, [agents, scope, q, sort]);
 
-  function toggleSort(field: Field) {
+  const toggleSort = (field: Field) =>
     setSort((s) => (s.field === field ? { field, dir: s.dir === "asc" ? "desc" : "asc" } : { field, dir: "desc" }));
-  }
-
-  function setStatus(id: string, status: AgentStatus, verb: string) {
-    setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
-    setOpen((o) => (o && o.id === id ? { ...o, status } : o));
-    toast(`${verb} ${agents.find((a) => a.id === id)?.name ?? "agent"}`);
-  }
 
   return (
     <>
       <PageHead
         title="Agents"
-        subtitle="Agents bid for posted work and are paid per x402 when their result verifies. Yours appear alongside the open market."
-        actions={
-          <>
-            <button
-              type="button"
-              onClick={() => setPosting(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-3 py-1.5 text-[13px] font-medium text-neutral-700 transition-colors hover:border-black/20 hover:text-neutral-900"
-            >
-              <Gavel size={14} /> Post a job
-            </button>
-            <button
-              type="button"
-              onClick={() => toast("Agent scaffold created — wire a handler to publish it")}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-900 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-neutral-800"
-            >
-              <Plus size={14} /> New agent
-            </button>
-          </>
-        }
+        subtitle="Every address here has actually been paid over x402 on Algorand MainNet. There is no registry to read, so an agent is defined by what it has earned rather than by what it claims."
       />
 
       <div className="flex flex-wrap items-center gap-3 pb-4">
@@ -93,47 +63,52 @@ export function AgentsView() {
           options={[
             { value: "all", label: "All", count: counts.all },
             { value: "mine", label: "Mine", count: counts.mine },
-            { value: "hired", label: "Hired", count: counts.hired },
           ]}
         />
-        <SearchInput value={q} onChange={setQ} placeholder="Search name, handle or skill…" className="w-full sm:w-[280px]" />
+        <SearchInput value={q} onChange={setQ} placeholder="Search by address…" className="w-full sm:w-[300px]" />
         <span className="tnum ml-auto text-[12.5px] text-neutral-400">
           {rows.length} of {counts.all}
         </span>
       </div>
 
-      {rows.length === 0 ? (
+      {status === "loading" ? (
+        <Sheet>
+          <p className="px-4 py-12 text-center text-[13px] text-neutral-400">reading the chain…</p>
+        </Sheet>
+      ) : status === "error" ? (
         <EmptyState
-          title="No agents match"
-          body={q ? `Nothing matches “${q}”. Try a skill like “extraction” or clear the search.` : "No agents in this view yet."}
-          action={
-            q ? (
-              <button type="button" onClick={() => setQ("")} className="rounded-lg border border-black/10 px-3 py-1.5 text-[13px] font-medium">
-                Clear search
-              </button>
-            ) : undefined
+          title="Could not read the chain"
+          body={`${error ?? "The indexer did not answer."} Nothing here is cached, so the table stays empty rather than showing something stale.`}
+        />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title={q ? "No agents match" : scope === "mine" ? "Nobody has paid your agent yet" : "No settlements in this window"}
+          body={
+            q
+              ? `Nothing matches “${q}”.`
+              : scope === "mine"
+                ? "Your endpoint is live and quoting. This fills in the moment a real payment lands — it will not show anything before then."
+                : "This is a young protocol and quiet stretches are normal. No rows are invented to fill the gap."
           }
         />
       ) : (
         <Sheet>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] text-[13.5px]">
+            <table className="w-full min-w-[860px] text-[13.5px]">
               <thead className="border-b border-black/[0.07] text-[12px]">
                 <tr>
-                  <SortHeader label="Agent" field="name" sort={sort} onSort={toggleSort} />
-                  <th scope="col" className="px-3 py-2 text-left font-medium text-neutral-400">Status</th>
-                  <th scope="col" className="px-3 py-2 text-left font-medium text-neutral-400">Skills</th>
-                  <SortHeader label="Jobs won" field="jobsWon" sort={sort} onSort={toggleSort} align="right" />
-                  <SortHeader label="Success" field="successRate" sort={sort} onSort={toggleSort} align="right" />
-                  <SortHeader label="Avg bid" field="avgBid" sort={sort} onSort={toggleSort} align="right" />
-                  <SortHeader label="Earned" field="earned" sort={sort} onSort={toggleSort} align="right" />
-                  <th scope="col" className="w-10 px-2 py-2" />
+                  <SortHeader label="Agent address" field="address" sort={sort} onSort={toggleSort} />
+                  <SortHeader label="Paid calls" field="calls" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="Distinct payers" field="payers" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="Median call" field="medianUsdc" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="Earned" field="earnedUsdc" sort={sort} onSort={toggleSort} align="right" />
+                  <th scope="col" className="px-3 py-2 text-right font-medium text-neutral-400">Last paid</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((a) => (
                   <tr
-                    key={a.id}
+                    key={a.address}
                     onClick={() => setOpen(a)}
                     className="group cursor-pointer border-b border-black/[0.05] transition-colors last:border-0 hover:bg-black/[0.02]"
                   >
@@ -142,10 +117,7 @@ export function AgentsView() {
                         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-black/[0.05] text-neutral-500">
                           <Bot size={14} />
                         </span>
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium text-neutral-900">{a.name}</span>
-                          <span className="block truncate font-mono text-[11.5px] text-neutral-400">@{a.handle}</span>
-                        </span>
+                        <span className="font-mono text-[12.5px] text-neutral-800">{shortAddr(a.address, 10, 6)}</span>
                         {a.mine && (
                           <span className="rounded-md bg-orange-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-accent">
                             Mine
@@ -153,51 +125,11 @@ export function AgentsView() {
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-2.5"><StatusPill status={a.status} /></td>
-                    <td className="px-3 py-2.5">
-                      <span className="flex flex-wrap gap-1">
-                        {a.skills.slice(0, 2).map((s) => (
-                          <span key={s} className="rounded-md bg-black/[0.04] px-1.5 py-0.5 text-[11.5px] text-neutral-600">
-                            {s}
-                          </span>
-                        ))}
-                        {a.skills.length > 2 && (
-                          <span className="px-1 py-0.5 text-[11.5px] text-neutral-400">+{a.skills.length - 2}</span>
-                        )}
-                      </span>
-                    </td>
-                    <td className="tnum px-3 py-2.5 text-right">{a.jobsWon.toLocaleString("en-US")}</td>
-                    <td className="tnum px-3 py-2.5 text-right">
-                      <span className={a.successRate >= 0.97 ? "text-neutral-900" : "text-amber-700"}>{pct(a.successRate)}</span>
-                    </td>
-                    <td className="tnum px-3 py-2.5 text-right text-neutral-600">{usd(a.avgBid)}</td>
-                    <td className="tnum px-3 py-2.5 text-right font-medium">{usd(a.earned)}</td>
-                    <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
-                      <Menu
-                        align="end"
-                        trigger={({ toggle }) => (
-                          <button
-                            type="button"
-                            onClick={toggle}
-                            aria-label={`Actions for ${a.name}`}
-                            className="rounded-md p-1 text-neutral-400 opacity-0 transition-all hover:bg-black/[0.05] hover:text-neutral-900 focus-visible:opacity-100 group-hover:opacity-100"
-                          >
-                            <MoreHorizontal size={15} />
-                          </button>
-                        )}
-                      >
-                        <MenuItem icon={<Send size={14} />} onClick={() => setOpen(a)}>Open</MenuItem>
-                        {a.status === "offline" ? (
-                          <MenuItem icon={<Play size={14} />} onClick={() => setStatus(a.id, "idle", "Brought online")}>
-                            Bring online
-                          </MenuItem>
-                        ) : (
-                          <MenuItem icon={<Pause size={14} />} onClick={() => setStatus(a.id, "offline", "Took offline")}>
-                            Take offline
-                          </MenuItem>
-                        )}
-                      </Menu>
-                    </td>
+                    <td className="tnum px-3 py-2.5 text-right">{a.calls}</td>
+                    <td className="tnum px-3 py-2.5 text-right text-neutral-600">{a.payers}</td>
+                    <td className="tnum px-3 py-2.5 text-right text-neutral-600">{usd(a.medianUsdc, 3)}</td>
+                    <td className="tnum px-3 py-2.5 text-right font-medium">{usd(a.earnedUsdc)}</td>
+                    <td className="px-3 py-2.5 text-right text-neutral-500">{ago(a.lastSeen)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -206,121 +138,45 @@ export function AgentsView() {
         </Sheet>
       )}
 
-      <SlideOver open={!!open} onClose={() => setOpen(null)} title={open?.name ?? ""}>
+      <p className="mt-2.5 text-[12px] text-neutral-400">
+        Derived from x402 settlements on Algorand MainNet. An agent with one payer and many calls is
+        usually one operator testing; many distinct payers is the signal worth watching.
+      </p>
+
+      <SlideOver open={!!open} onClose={() => setOpen(null)} title="Agent" width="max-w-lg">
         {open && (
           <div className="space-y-7">
             <div>
-              <div className="flex items-center gap-2.5">
-                <StatusPill status={open.status} />
-                <span className="font-mono text-[12px] text-neutral-400">@{open.handle}</span>
-              </div>
-              <p className="mt-3 text-[13.5px] leading-relaxed text-neutral-600">{open.summary}</p>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {open.skills.map((s) => (
-                  <span key={s} className="rounded-md bg-black/[0.04] px-2 py-0.5 text-[12px] text-neutral-600">{s}</span>
-                ))}
-              </div>
+              <p className="break-all font-mono text-[12.5px] text-neutral-700">{open.address}</p>
+              <a
+                href={`https://allo.info/account/${open.address}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1 text-[12.5px] text-neutral-500 underline underline-offset-2 hover:text-accent"
+              >
+                View on the block explorer <ExternalLink size={11} />
+              </a>
             </div>
 
             <div className="grid grid-cols-2 gap-5 border-t border-black/[0.07] pt-5">
-              <Metric label="Jobs won" value={open.jobsWon.toLocaleString("en-US")} hint={`of ${open.jobsBid.toLocaleString("en-US")} bids`} />
-              <Metric label="Success rate" value={pct(open.successRate)} hint="verified results" />
-              <Metric label="Earned" value={usd(open.earned)} unit="USDC" />
-              <Metric label="Median response" value={`${open.responseMs}`} unit="ms" />
+              <Metric label="Paid calls" value={String(open.calls)} hint="settlements received" />
+              <Metric label="Distinct payers" value={String(open.payers)} />
+              <Metric label="Earned" value={usd(open.earnedUsdc)} unit="USDC" />
+              <Metric label="Median call" value={usd(open.medianUsdc, 3)} unit="USDC" hint="a proxy for list price" />
             </div>
 
             <div className="border-t border-black/[0.07] pt-5">
-              <h3 className="text-[13px] font-semibold text-neutral-900">Bidding</h3>
+              <h3 className="text-[13px] font-semibold text-neutral-900">What this is, exactly</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-neutral-500">
-                Average bid {usd(open.avgBid)} USDC. Escrow releases only once the result passes the
-                job&rsquo;s verification, so an unverified run pays nothing.
+                An address observed receiving x402 payments in the recent window. We do not know its
+                name, its endpoints or its owner — the chain does not carry that. What we do know is
+                that {open.payers} distinct {open.payers === 1 ? "party has" : "parties have"} paid it{" "}
+                {open.calls} {open.calls === 1 ? "time" : "times"}, which is harder to fake than a listing.
               </p>
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => { setPosting(true); setOpen(null); }}
-                  className="rounded-lg bg-neutral-900 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-neutral-800"
-                >
-                  Post a job to {open.name}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatus(open.id, open.status === "offline" ? "idle" : "offline", open.status === "offline" ? "Brought online" : "Took offline")}
-                  className="rounded-lg border border-black/10 px-3 py-1.5 text-[13px] font-medium text-neutral-700 transition-colors hover:border-black/20"
-                >
-                  {open.status === "offline" ? "Bring online" : "Take offline"}
-                </button>
-              </div>
             </div>
           </div>
         )}
       </SlideOver>
-
-      <PostJob open={posting} onClose={() => setPosting(false)} />
     </>
-  );
-}
-
-function PostJob({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [title, setTitle] = useState("");
-  const [budget, setBudget] = useState("2.50");
-  const [closes, setCloses] = useState("15m");
-  const [err, setErr] = useState<string | null>(null);
-  const { toast } = useToast();
-
-  function submit() {
-    if (!title.trim()) return setErr("Give the job a title so agents know what they are bidding on.");
-    const b = Number(budget);
-    if (!Number.isFinite(b) || b < 0.1) return setErr("Budget must be at least 0.10 USDC.");
-    setErr(null);
-    toast(`Job posted — ${usd(b)} USDC held in escrow`, "success");
-    setTitle("");
-    onClose();
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Post a job" description="Competing agents bid. Escrow releases only against a verified result.">
-      <div className="space-y-4">
-        <label className="block">
-          <span className="text-[12.5px] font-medium text-neutral-700">What needs doing</span>
-          <input
-            value={title}
-            onChange={(e) => { setTitle(e.target.value); setErr(null); }}
-            placeholder="Enrich 5,000 wallet addresses"
-            className="mt-1.5 w-full rounded-lg border border-black/10 px-3 py-2 text-[13.5px] outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-400"
-          />
-        </label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
-            <span className="text-[12.5px] font-medium text-neutral-700">Budget (USDC)</span>
-            <input
-              value={budget}
-              onChange={(e) => { setBudget(e.target.value); setErr(null); }}
-              inputMode="decimal"
-              className="tnum mt-1.5 w-full rounded-lg border border-black/10 px-3 py-2 text-[13.5px] outline-none focus:border-neutral-400"
-            />
-          </label>
-          <label className="block">
-            <span className="text-[12.5px] font-medium text-neutral-700">Bidding closes</span>
-            <select
-              value={closes}
-              onChange={(e) => setCloses(e.target.value)}
-              className="mt-1.5 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-[13.5px] outline-none focus:border-neutral-400"
-            >
-              {["5m", "15m", "1h", "24h"].map((o) => <option key={o}>{o}</option>)}
-            </select>
-          </label>
-        </div>
-        {err && <p className="text-[12.5px] text-rose-600">{err}</p>}
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-[13px] font-medium text-neutral-600 transition-colors hover:text-neutral-900">
-            Cancel
-          </button>
-          <button type="button" onClick={submit} className={cn("rounded-lg bg-neutral-900 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-neutral-800")}>
-            Post job
-          </button>
-        </div>
-      </div>
-    </Modal>
   );
 }
