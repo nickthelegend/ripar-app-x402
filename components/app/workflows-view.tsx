@@ -6,12 +6,18 @@ import { Menu, MenuItem } from "@/components/ui/menu";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { WORKFLOWS, usd, type Status, type Step, type Workflow } from "@/lib/app-data";
+import { clearActivity, recordRun } from "@/lib/workflow-activity";
+import { clearGraph } from "@/lib/workflow-graph";
 import { EmptyState, PageHead, SearchInput, Segmented, Sheet, StatusPill } from "./bits";
 import { STEP_KINDS, WorkflowCanvas } from "./workflow-canvas";
 
 type Filter = "all" | "live" | "paused" | "draft";
 
 const costOf = (steps: Step[]) => steps.reduce((sum, s) => sum + (s.price ?? 0), 0);
+
+/** How long a run rests on each step. Slow enough to read, quick enough to sit
+ *  through — and the unit the recorded duration is measured in. */
+const STEP_MS = 620;
 
 // The server's copy of each chain, captured before the session edits anything.
 // The builder's "reset to saved" goes back to this, not to the live item.
@@ -81,18 +87,30 @@ export function WorkflowsView() {
   function run(w: Workflow) {
     if (running) return;
     if (w.steps.length === 0) return toast("Nothing to run — this workflow has no steps yet", "error");
+    let started = 0;
     let step = 0;
     setRunning({ id: w.id, step });
     const tick = setInterval(() => {
+      // Clocked from inside the interval — the first tick is one step in, and
+      // reading the clock during render is neither pure nor allowed.
+      if (!started) started = Date.now() - STEP_MS;
       step += 1;
       if (step >= w.steps.length) {
         clearInterval(tick);
         setRunning(null);
+        // The walk that just happened is the only thing the builder's Runs tab
+        // ever shows — no run is written for a workflow nobody ran.
+        recordRun(w.id, {
+          outcome: "ok",
+          steps: w.steps.length,
+          cost: w.costPerRun,
+          ms: Date.now() - started,
+        });
         toast(`${w.name} completed · ${usd(w.costPerRun, 3)} USDC`, "success");
       } else {
         setRunning({ id: w.id, step });
       }
-    }, 620);
+    }, STEP_MS);
   }
 
   // The canvas hands the edited chain back so the list, the run and the cost
@@ -101,18 +119,37 @@ export function WorkflowsView() {
     setItems((p) => p.map((w) => (w.id === id ? { ...w, steps, costPerRun: costOf(steps) } : w)));
   }, []);
 
+  /** The builder's Properties tab edits the workflow itself, not its chain. */
+  const rename = useCallback((id: string, patch: { name?: string; summary?: string }) => {
+    setItems((p) => p.map((w) => (w.id === id ? { ...w, ...patch } : w)));
+  }, []);
+
+  function remove(w: Workflow) {
+    // The draft graph and the activity are keyed by id — leaving them behind
+    // would hand a later workflow with the same id somebody else's history.
+    clearGraph(w.id);
+    clearActivity(w.id);
+    setItems((p) => p.filter((x) => x.id !== w.id));
+    setOpenId(null);
+    toast(`Deleted ${w.name}`);
+  }
+
   const open = openId ? (items.find((w) => w.id === openId) ?? null) : null;
 
   if (open) {
     return (
       <Builder
         workflow={open}
+        workflows={items}
         running={running?.id === open.id ? running.step : undefined}
         busy={!!running}
         onBack={() => setOpenId(null)}
+        onOpen={setOpenId}
         onRun={() => run(open)}
         onStatus={setStatus}
         onSteps={saveSteps}
+        onRename={rename}
+        onDelete={() => remove(open)}
       />
     );
   }
@@ -235,24 +272,37 @@ export function WorkflowsView() {
 /** The builder: the same workflow, opened as the graph it actually is. */
 function Builder({
   workflow,
+  workflows,
   running,
   busy,
   onBack,
+  onOpen,
   onRun,
   onStatus,
   onSteps,
+  onRename,
+  onDelete,
 }: {
   workflow: Workflow;
+  /** Every workflow in the workspace — the canvas rail switches between them. */
+  workflows: Workflow[];
   running?: number;
   busy: boolean;
   onBack: () => void;
+  onOpen: (id: string) => void;
   onRun: () => void;
   onStatus: (id: string, status: Status, verb: string) => void;
   onSteps: (id: string, steps: Step[]) => void;
+  onRename: (id: string, patch: { name?: string; summary?: string }) => void;
+  onDelete: () => void;
 }) {
   // A metered MCP tool bills the same way a paid call does, so it counts here.
   const paid = workflow.steps.filter((s) => s.kind === "call" || (s.kind === "mcp" && !!s.price)).length;
   const onStepsChange = useCallback((steps: Step[]) => onSteps(workflow.id, steps), [onSteps, workflow.id]);
+  const onRenamePatch = useCallback(
+    (patch: { name?: string; summary?: string }) => onRename(workflow.id, patch),
+    [onRename, workflow.id]
+  );
 
   return (
     <>
@@ -317,12 +367,20 @@ function Builder({
         ))}
       </div>
 
+      {/* Deliberately unkeyed: the canvas keys its own React Flow provider by
+          workflow, so a switch from its rail reloads the graph without folding
+          away the rail that switched it. */}
       <WorkflowCanvas
-        key={workflow.id}
         workflow={workflow}
+        workflows={workflows}
         saved={SAVED_STEPS.get(workflow.id) ?? workflow.steps}
         runningStep={running}
+        busy={busy}
+        onOpen={onOpen}
+        onRun={onRun}
         onStepsChange={onStepsChange}
+        onRename={onRenamePatch}
+        onDelete={onDelete}
       />
 
       <p className="mt-3 max-w-[76ch] text-[12.5px] leading-relaxed text-neutral-500">

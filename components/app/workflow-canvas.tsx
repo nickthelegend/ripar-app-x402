@@ -8,13 +8,13 @@ import {
   useState,
   useSyncExternalStore,
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import {
   Background,
   BackgroundVariant,
   ConnectionLineType,
-  Controls,
   Handle,
   MarkerType,
   MiniMap,
@@ -32,20 +32,48 @@ import {
   type NodeProps,
   type NodeTypes,
   type OnConnect,
+  type OnDelete,
   type OnEdgesChange,
   type OnNodesChange,
   type XYPosition,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { ArrowRight, Blocks, Clock, GitBranch, PanelLeft, RotateCcw, Trash2, Zap } from "lucide-react";
+import {
+  ArrowRight,
+  Blocks,
+  Clock,
+  Download,
+  GitBranch,
+  Lock,
+  LockOpen,
+  Maximize2,
+  Minus,
+  PanelLeft,
+  Play,
+  Plus,
+  RotateCcw,
+  Save,
+  Trash2,
+  Zap,
+} from "lucide-react";
+import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { usd, type Step, type StepKind, type Workflow } from "@/lib/app-data";
 import { DND_MCP_TOOL, MCP_CATEGORIES, type McpTool } from "@/lib/mcp-tools";
 import { useMcpToolIndex } from "@/lib/mcp-servers";
 import { clearGraph, loadGraph, nextSeq, saveGraph, type WorkflowGraph } from "@/lib/workflow-graph";
-import { Sheet } from "./bits";
+import {
+  COALESCE_MS,
+  recordEdit,
+  useActivity,
+  type WorkflowEdit,
+  type WorkflowRun,
+} from "@/lib/workflow-activity";
+import { CopyButton, Sheet } from "./bits";
+import { HistoryPanel, RunsPanel } from "./workflow-activity-panels";
 import { MCP_CATEGORY_ICON, McpPalette } from "./mcp-palette";
+import { WorkflowRail } from "./workflow-rail";
 
 /** One table for what a step kind looks like, shared with the list's chain. */
 export const STEP_KINDS: Record<StepKind, {
@@ -94,17 +122,26 @@ const CARD = { w: 212, h: 52 };
 
 const defaultEdgeOptions: DefaultEdgeOptions = {
   type: "smoothstep",
-  markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "rgba(0,0,0,0.35)" },
+  // The canvas is dark, so the arrow is drawn out of the ink rather than onto it.
+  markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "rgba(255,255,255,0.42)" },
 };
 
 /* ── node bodies ───────────────────────────────────────────────────────── */
+
+/** A card's glyph wears its kind's own swatch, mixed for the dark canvas — one
+ *  colour table drives the light list, the minimap and the node alike. */
+const glyph = (swatch: string) => ({
+  color: `color-mix(in srgb, ${swatch} 74%, white)`,
+  background: `color-mix(in srgb, ${swatch} 20%, transparent)`,
+  boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${swatch} 30%, transparent)`,
+});
 
 function StepCard({
   kind,
   data,
   selected,
   icon: Icon = STEP_KINDS[kind].Icon,
-  chip = STEP_KINDS[kind].chip,
+  swatch = STEP_KINDS[kind].swatch,
   sub = STEP_KINDS[kind].label,
   children,
 }: {
@@ -113,28 +150,31 @@ function StepCard({
   selected?: boolean;
   /** An MCP card wears its tool's category rather than the kind's own mark. */
   icon?: typeof Clock;
-  chip?: string;
+  swatch?: string;
   sub?: string;
   children?: ReactNode;
 }) {
   return (
     <div
       className={cn(
-        "w-[212px] rounded-xl border bg-white pb-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-colors",
+        "w-[212px] rounded-xl border pb-2.5 transition-colors",
         data.running
-          ? "border-accent/50 bg-orange-50"
+          ? "border-accent/70 bg-[#221408] shadow-[0_10px_30px_-14px_rgba(255,107,43,0.9)]"
           : selected
-            ? "border-neutral-900/30 ring-2 ring-accent/25"
-            : "border-black/[0.09]"
+            ? "border-accent/55 bg-[#191b1d] shadow-[0_0_0_1px_rgba(255,107,43,0.22)]"
+            : "border-white/[0.09] bg-[#16181a] hover:border-white/20"
       )}
     >
       <div className="flex h-7 items-center gap-2 px-3 pt-2.5">
-        <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md", chip)}>
+        <span
+          style={glyph(swatch)}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+        >
           <Icon size={13} />
         </span>
         <span className="min-w-0 flex-1 leading-tight">
-          <span className="block truncate text-[12.5px] font-medium text-neutral-900">{data.name}</span>
-          <span className="block truncate text-[10.5px] text-neutral-400">{sub}</span>
+          <span className="block truncate text-[12.5px] font-medium text-neutral-100">{data.name}</span>
+          <span className="block truncate text-[10.5px] text-white/40">{sub}</span>
         </span>
       </div>
       {children}
@@ -161,9 +201,9 @@ function CallNode({ data, selected }: NodeProps<StepNode>) {
     <>
       <Handle type="target" position={Position.Left} />
       <StepCard kind="call" data={data} selected={selected}>
-        <div className="mx-3 mt-2 flex items-baseline justify-between border-t border-black/[0.06] pt-2">
-          <span className="text-[10.5px] text-neutral-400">Price</span>
-          <span className="tnum text-[11.5px] font-medium text-neutral-700">
+        <div className="mx-3 mt-2 flex items-baseline justify-between border-t border-white/[0.08] pt-2">
+          <span className="text-[10.5px] text-white/40">Price</span>
+          <span className="tnum text-[11.5px] font-medium text-white/75">
             {data.price ? `${usd(data.price, 3)} USDC` : "free"}
           </span>
         </div>
@@ -178,7 +218,7 @@ function ConditionNode({ data, selected }: NodeProps<StepNode>) {
     <>
       <Handle type="target" position={Position.Left} />
       <StepCard kind="condition" data={data} selected={selected}>
-        <div className="mx-3 mt-2 border-t border-black/[0.06] pt-2 text-[10.5px] text-neutral-400">
+        <div className="mx-3 mt-2 border-t border-white/[0.08] pt-2 text-[10.5px] text-white/40">
           <div className="flex h-5 items-center">yes</div>
           <div className="flex h-5 items-center">no</div>
         </div>
@@ -214,12 +254,12 @@ function McpNode({ data, selected }: NodeProps<StepNode>) {
         data={data}
         selected={selected}
         icon={tool ? MCP_CATEGORY_ICON[tool.category] : STEP_KINDS.mcp.Icon}
-        chip={category?.chip ?? STEP_KINDS.mcp.chip}
+        swatch={category?.swatch ?? STEP_KINDS.mcp.swatch}
         sub={tool && category ? `MCP · ${tool.serverLabel ?? category.label}` : "MCP · tool not attached"}
       >
-        <div className="mx-3 mt-2 flex items-baseline justify-between gap-2 border-t border-black/[0.06] pt-2">
-          <span className="min-w-0 truncate font-mono text-[10px] text-neutral-400">{data.tool ?? "no tool"}</span>
-          <span className="tnum shrink-0 text-[11.5px] font-medium text-neutral-700">
+        <div className="mx-3 mt-2 flex items-baseline justify-between gap-2 border-t border-white/[0.08] pt-2">
+          <span className="min-w-0 truncate font-mono text-[10px] text-white/35">{data.tool ?? "no tool"}</span>
+          <span className="tnum shrink-0 text-[11.5px] font-medium text-white/75">
             {data.price ? `${usd(data.price, 3)} USDC` : "free"}
           </span>
         </div>
@@ -343,20 +383,86 @@ const fromGraph = (g: WorkflowGraph): { nodes: StepNode[]; edges: Edge[] } => ({
 const clock = (at: number) =>
   new Date(at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
+/* ── shared control styling ────────────────────────────────────────────── */
+
+const BTN =
+  "inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition-colors hover:border-black/20 hover:text-neutral-900 disabled:cursor-not-allowed disabled:text-neutral-300 disabled:hover:border-black/10 disabled:hover:text-neutral-300";
+
+const FIELD =
+  "w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-[13.5px] outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-400 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-400";
+
+/** Icon-only toolbar control. Never unlabelled — the name is what a screen
+ *  reader reads and what the tooltip shows. */
+function IconButton({
+  label,
+  Icon,
+  onClick,
+  pressed,
+  disabled,
+}: {
+  label: string;
+  Icon: typeof Clock;
+  onClick: () => void;
+  pressed?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      aria-pressed={pressed}
+      className={cn(
+        "inline-flex h-[30px] w-[30px] items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:border-black/[0.07] disabled:text-neutral-300",
+        pressed
+          ? "border-neutral-900/25 bg-neutral-900 text-white hover:bg-neutral-800"
+          : "border-black/10 bg-white text-neutral-500 hover:border-black/20 hover:text-neutral-900"
+      )}
+    >
+      <Icon size={14} />
+    </button>
+  );
+}
+
 /* ── canvas ────────────────────────────────────────────────────────────── */
 
 /** Nothing to subscribe to — the snapshot pair alone is what tells the canvas
  *  it is past hydration. */
 const noSubscribe = () => () => {};
 
-export function WorkflowCanvas(props: {
+type CanvasProps = {
   workflow: Workflow;
-  /** The server's copy of the chain — what "reset to saved" goes back to. */
+  /** Every workflow in the workspace, for the rail that switches between them. */
+  workflows?: Workflow[];
+  /** The server's copy of the chain — what "revert to saved" goes back to. */
   saved?: Step[];
   /** Index into the workflow's steps while a run walks the chain. */
   runningStep?: number;
+  /** A run is in flight — this workflow's or another's. */
+  busy?: boolean;
+  onOpen?: (id: string) => void;
   onStepsChange?: (steps: Step[]) => void;
-}) {
+  onRun?: () => void;
+  onRename?: (patch: { name?: string; summary?: string }) => void;
+  onDelete?: () => void;
+};
+
+/** How the builder is arranged, as opposed to what is on the canvas. It lives
+ *  above the per-workflow remount because switching workflows from the rail
+ *  must not fold the rail away under you. */
+type Chrome = { rail: boolean; tools: boolean; locked: boolean; tab: Tab };
+
+// A phone has no room for the rails stacked above the canvas, so they start
+// collapsed there. The server has no width to read, and never draws the canvas.
+const openChrome = (): Chrome =>
+  typeof window === "undefined"
+    ? { rail: false, tools: false, locked: false, tab: "properties" }
+    : { rail: window.innerWidth >= 1024, tools: window.innerWidth >= 768, locked: false, tab: "properties" };
+
+export function WorkflowCanvas(props: CanvasProps) {
+  const [chrome, setChrome] = useState<Chrome>(openChrome);
   // The draft lives in localStorage, which the server cannot read. Mounting the
   // canvas only after hydration lets it seed from the draft in one pass, rather
   // than drawing the stored chain and swapping it out a frame later.
@@ -364,26 +470,28 @@ export function WorkflowCanvas(props: {
   if (!hydrated) return <CanvasSkeleton />;
 
   // useReactFlow() is called by Canvas itself, which is exactly the case the
-  // provider exists for — <ReactFlow> alone does not supply the store.
+  // provider exists for — <ReactFlow> alone does not supply the store. Keyed by
+  // workflow so a switch starts a clean graph and a clean store, rather than
+  // reconciling two.
   return (
-    <ReactFlowProvider>
-      <Canvas {...props} />
+    <ReactFlowProvider key={props.workflow.id}>
+      <Canvas {...props} chrome={chrome} onChrome={setChrome} />
     </ReactFlowProvider>
   );
 }
 
 function CanvasSkeleton() {
-  // Holds the builder's frame — toolbar, tool rail, pane, inspector — so the
-  // page does not jump when the real canvas takes over a frame later.
+  // Holds the builder's frame — toolbar, rails, pane, inspector — so the page
+  // does not jump when the real canvas takes over a frame later.
   return (
     <Sheet>
       <div className="h-[45px] border-b border-black/[0.07]" />
       <div className="flex flex-col md:h-[520px] md:flex-row">
         <div className="border-b border-black/[0.07] md:w-[218px] md:shrink-0 md:border-b-0 md:border-r" />
-        <div className="flex h-[380px] min-w-0 items-center justify-center bg-[#fbfbfb] md:h-auto md:flex-1">
-          <p className="animate-pulse text-[13px] text-neutral-400">Loading the builder…</p>
+        <div className="flex h-[380px] min-w-0 items-center justify-center bg-[#0e0f11] md:h-auto md:flex-1">
+          <p className="animate-pulse text-[13px] text-white/45">Loading the builder…</p>
         </div>
-        <div className="border-t border-black/[0.07] md:w-[264px] md:shrink-0 md:border-l md:border-t-0" />
+        <div className="border-t border-black/[0.07] md:w-[288px] md:shrink-0 md:border-l md:border-t-0" />
       </div>
     </Sheet>
   );
@@ -391,17 +499,20 @@ function CanvasSkeleton() {
 
 function Canvas({
   workflow,
+  workflows,
   saved,
   runningStep,
+  busy,
+  chrome,
+  onChrome,
+  onOpen,
   onStepsChange,
-}: {
-  workflow: Workflow;
-  saved?: Step[];
-  runningStep?: number;
-  onStepsChange?: (steps: Step[]) => void;
-}) {
-  // Seeded once, from the locally stored draft when there is one. The caller
-  // keys this component by workflow id, so switching workflows remounts rather
+  onRun,
+  onRename,
+  onDelete,
+}: CanvasProps & { chrome: Chrome; onChrome: (next: (c: Chrome) => Chrome) => void }) {
+  // Seeded once, from the locally stored draft when there is one. The provider
+  // above is keyed by workflow id, so switching workflows remounts this rather
   // than trying to reconcile two graphs.
   const [seed] = useState(() => {
     const draft = loadGraph(workflow.id);
@@ -410,22 +521,33 @@ function Canvas({
   });
   const [nodes, setNodes] = useState<StepNode[]>(seed.nodes);
   const [edges, setEdges] = useState<Edge[]>(seed.edges);
-  // A phone has no room for the tool rail stacked above the canvas, so it
-  // starts collapsed there. Reading the width here is safe: this component
-  // only ever mounts in the browser.
-  const [tools, setTools] = useState(() => window.innerWidth >= 768);
+  const { rail, tools, locked, tab } = chrome;
+  const setPanel = useCallback(
+    (next: Partial<Chrome>) => onChrome((c) => ({ ...c, ...next })),
+    [onChrome]
+  );
   const [dropping, setDropping] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [draftAt, setDraftAt] = useState<number | null>(seed.at);
   const seq = useRef(nextSeq(seed.nodes));
   // What is on disk, so an untouched graph is never written back over itself.
   const stored = useRef(seed.signature);
+  // The name a rename burst started from, so a coalesced log line still names
+  // what the step used to be called rather than its second-to-last keystroke.
+  const renamedFrom = useRef<{ id: string; from: string; at: number } | null>(null);
   const pane = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition, setCenter, getZoom, fitView } = useReactFlow();
+  const { screenToFlowPosition, setCenter, getZoom, fitView, zoomIn, zoomOut } = useReactFlow();
   const catalogue = useMcpToolIndex();
+  const activity = useActivity(workflow.id);
   const { toast } = useToast();
 
   const selectedNode = nodes.find((n) => n.selected) ?? null;
   const selectedEdge = edges.find((e) => e.selected) ?? null;
+
+  const log = useCallback(
+    (text: string, key?: string) => recordEdit(workflow.id, text, key),
+    [workflow.id]
+  );
 
   // The parent only cares about the ordered steps, so drags — which change
   // positions but not the chain — stay out of its state.
@@ -470,20 +592,29 @@ function Canvas({
     []
   );
 
-  const onConnect: OnConnect = useCallback((c) => {
-    if (!c.source || !c.target) return;
-    setEdges((prev) => [
-      ...prev,
-      {
-        id: edgeId(c.source, c.sourceHandle ?? undefined, c.target),
-        source: c.source,
-        target: c.target,
-        sourceHandle: c.sourceHandle ?? undefined,
-        targetHandle: c.targetHandle ?? undefined,
-        ...defaultEdgeOptions,
-      },
-    ]);
-  }, []);
+  const nameOf = useCallback(
+    (id: string) => nodes.find((n) => n.id === id)?.data.name ?? "a step",
+    [nodes]
+  );
+
+  const onConnect: OnConnect = useCallback(
+    (c) => {
+      if (!c.source || !c.target) return;
+      setEdges((prev) => [
+        ...prev,
+        {
+          id: edgeId(c.source, c.sourceHandle ?? undefined, c.target),
+          source: c.source,
+          target: c.target,
+          sourceHandle: c.sourceHandle ?? undefined,
+          targetHandle: c.targetHandle ?? undefined,
+          ...defaultEdgeOptions,
+        },
+      ]);
+      log(`Connected “${nameOf(c.source)}” to “${nameOf(c.target)}”`);
+    },
+    [log, nameOf]
+  );
 
   /** Reachability, so a connection can't close a loop the runner would never leave. */
   const isValidConnection: IsValidConnection = useCallback(
@@ -506,10 +637,15 @@ function Canvas({
     [nodes, edges]
   );
 
-  const select = useCallback((id: string) => {
-    setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === id })));
-    setEdges((prev) => prev.map((e) => (e.selected ? { ...e, selected: false } : e)));
-  }, []);
+  const select = useCallback(
+    (id: string) => {
+      setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === id })));
+      setEdges((prev) => prev.map((e) => (e.selected ? { ...e, selected: false } : e)));
+      // Picking a step is a request to see it, whichever tab was last open.
+      setPanel({ tab: "properties" });
+    },
+    [setPanel]
+  );
 
   /**
    * Dropping on the pane places a loose step wherever the cursor was. Adding
@@ -546,8 +682,9 @@ function Canvas({
       // A step added from the toolbar lands off the right of a long chain, so
       // the view follows it. A dropped one is already under the cursor.
       if (!at) setCenter(position.x + CARD.w / 2, position.y + CARD.h, { zoom: getZoom(), duration: 240 });
+      log(`Added ${STEP_KINDS[kind].label.toLowerCase()} “${data.name}”`);
     },
-    [nodes, edges, setCenter, getZoom]
+    [nodes, edges, setCenter, getZoom, log]
   );
 
   const addStep = useCallback(
@@ -574,30 +711,86 @@ function Canvas({
     return spot;
   }, [nodes, screenToFlowPosition]);
 
-  const updateStep = useCallback((id: string, patch: Partial<StepData> & { kind?: StepKind }) => {
-    const { kind, ...data } = patch;
-    setNodes((prev) =>
-      prev.map((n) => {
-        if (n.id !== id) return n;
-        // Price belongs to paid calls only, so it follows the kind.
-        const priced = kind == null ? {} : kind === "call" ? { price: n.data.price ?? 0.01 } : { price: undefined };
-        // A tool reference means nothing once the step is no longer an MCP one.
-        const tooled = kind == null || kind === "mcp" ? {} : { tool: undefined };
-        return { ...n, type: kind ?? n.type, data: { ...n.data, ...priced, ...tooled, ...data } };
-      })
-    );
-  }, []);
+  /** A locked canvas is read-only: it can be inspected and run, not rewired. */
+  const blocked = useCallback(() => {
+    if (!locked) return false;
+    toast("The canvas is locked — unlock it to edit the chain", "error");
+    return true;
+  }, [locked, toast]);
 
-  const deleteStep = useCallback((id: string) => {
-    setNodes((prev) => prev.filter((n) => n.id !== id));
-    setEdges((prev) => prev.filter((e) => e.source !== id && e.target !== id));
-  }, []);
+  const updateStep = useCallback(
+    (id: string, patch: Partial<StepData> & { kind?: StepKind }) => {
+      const target = nodes.find((n) => n.id === id);
+      const { kind, ...data } = patch;
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (n.id !== id) return n;
+          // Price belongs to paid calls only, so it follows the kind.
+          const priced = kind == null ? {} : kind === "call" ? { price: n.data.price ?? 0.01 } : { price: undefined };
+          // A tool reference means nothing once the step is no longer an MCP one.
+          const tooled = kind == null || kind === "mcp" ? {} : { tool: undefined };
+          return { ...n, type: kind ?? n.type, data: { ...n.data, ...priced, ...tooled, ...data } };
+        })
+      );
+      if (!target) return;
 
-  const deleteLink = useCallback((id: string) => {
-    setEdges((prev) => prev.filter((e) => e.id !== id));
-  }, []);
+      if (data.name != null && data.name !== target.data.name) {
+        const burst = renamedFrom.current;
+        const from =
+          burst && burst.id === id && Date.now() - burst.at < COALESCE_MS ? burst.from : target.data.name;
+        renamedFrom.current = { id, from, at: Date.now() };
+        log(`Renamed “${from}” to “${data.name}”`, `name:${id}`);
+      }
+      if (kind && kind !== target.type) {
+        log(`“${target.data.name}” is now a ${STEP_KINDS[kind].label.toLowerCase()}`, `kind:${id}`);
+      }
+      if (data.price != null && data.price !== target.data.price) {
+        log(`Priced “${target.data.name}” at ${usd(data.price, 3)} USDC`, `price:${id}`);
+      }
+      if (data.tool && data.tool !== target.data.tool) {
+        log(`“${target.data.name}” now runs ${data.tool}`, `tool:${id}`);
+      }
+    },
+    [nodes, log]
+  );
+
+  const deleteStep = useCallback(
+    (id: string) => {
+      log(`Deleted “${nameOf(id)}”`);
+      setNodes((prev) => prev.filter((n) => n.id !== id));
+      setEdges((prev) => prev.filter((e) => e.source !== id && e.target !== id));
+    },
+    [log, nameOf]
+  );
+
+  const deleteLink = useCallback(
+    (id: string) => {
+      const edge = edges.find((e) => e.id === id);
+      if (edge) log(`Disconnected “${nameOf(edge.source)}” from “${nameOf(edge.target)}”`);
+      setEdges((prev) => prev.filter((e) => e.id !== id));
+    },
+    [edges, log, nameOf]
+  );
+
+  /** Backspace and Delete remove through React Flow itself rather than through
+   *  the inspector, so the log is written here too — an edit made with the
+   *  keyboard is still an edit, and History must not quietly miss it. */
+  const onGraphDelete: OnDelete<StepNode, Edge> = useCallback(
+    ({ nodes: gone, edges: cut }) => {
+      for (const n of gone) log(`Deleted “${n.data.name}”`);
+      // An edge pulled out with its node is not a separate change the user made.
+      const removed = new Set(gone.map((n) => n.id));
+      for (const e of cut) {
+        if (removed.has(e.source) || removed.has(e.target)) continue;
+        log(`Disconnected “${nameOf(e.source)}” from “${nameOf(e.target)}”`);
+      }
+    },
+    [log, nameOf]
+  );
 
   const resetToSaved = useCallback(() => {
+    // Reverting rewrites the whole chain, so the lock has to hold it back too.
+    if (blocked()) return;
     const base = fromSteps(saved ?? workflow.steps);
     clearGraph(workflow.id);
     stored.current = JSON.stringify(toGraph(base.nodes, base.edges));
@@ -606,12 +799,81 @@ function Canvas({
     setEdges(base.edges);
     setDraftAt(null);
     frame();
+    log("Reverted to the saved workflow");
     toast("Reverted to the saved workflow");
-  }, [saved, workflow.id, workflow.steps, frame, toast]);
+  }, [blocked, saved, workflow.id, workflow.steps, frame, log, toast]);
+
+  /** Writes the draft now rather than waiting out the debounce, so "Save" is a
+   *  thing that happened and not a thing that is about to. */
+  const saveNow = useCallback(() => {
+    const graph = toGraph(nodes, edges);
+    const at = saveGraph(workflow.id, graph);
+    if (at == null) {
+      toast("This browser refused to store the draft", "error");
+      return;
+    }
+    stored.current = JSON.stringify(graph);
+    setDraftAt(at);
+    log("Saved the draft");
+    toast("Draft saved on this device");
+  }, [nodes, edges, workflow.id, log, toast]);
+
+  const clearCanvas = useCallback(() => {
+    if (blocked()) return;
+    if (nodes.length === 0) {
+      toast("The canvas is already empty");
+      return;
+    }
+    const before = { nodes, edges };
+    setNodes([]);
+    setEdges([]);
+    log(`Cleared the canvas · ${before.nodes.length} ${before.nodes.length === 1 ? "step" : "steps"} removed`);
+    toast(`Cleared ${before.nodes.length} ${before.nodes.length === 1 ? "step" : "steps"}`, "default", {
+      label: "Undo",
+      onClick: () => {
+        setNodes(before.nodes);
+        setEdges(before.edges);
+        log("Undid the clear");
+        frame();
+      },
+    });
+  }, [blocked, nodes, edges, frame, log, toast]);
+
+  /** The graph as it stands, as a file — the same shape the draft is stored in,
+   *  plus the ordered steps a runner would walk. */
+  const downloadJson = useCallback(() => {
+    const payload = {
+      id: workflow.id,
+      name: workflow.name,
+      summary: workflow.summary,
+      trigger: workflow.trigger,
+      exportedAt: new Date().toISOString(),
+      steps: toSteps(nodes, edges),
+      graph: toGraph(nodes, edges),
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${workflow.id}.workflow.json`;
+    link.click();
+    // Revoking in the same tick can beat the download in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    toast(`Downloaded ${workflow.id}.workflow.json`);
+  }, [workflow, nodes, edges, toast]);
+
+  const rename = useCallback(
+    (patch: { name?: string; summary?: string }) => {
+      onRename?.(patch);
+      if (patch.name != null) log(`Renamed the workflow to “${patch.name}”`, "wf:name");
+      if (patch.summary != null) log("Edited the workflow description", "wf:summary");
+    },
+    [onRename, log]
+  );
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDropping(false);
+    if (blocked()) return;
     const at = screenToFlowPosition({ x: event.clientX, y: event.clientY });
     const spot = { x: at.x - CARD.w / 2, y: at.y - CARD.h / 2 };
 
@@ -648,32 +910,39 @@ function Canvas({
     [edges, activeId]
   );
 
+  const running = runningStep != null;
+
   return (
     <Sheet>
-      <div className="flex flex-wrap items-center gap-2 border-b border-black/[0.07] px-3 py-2.5">
-        <button
-          type="button"
-          onClick={() => setTools((v) => !v)}
-          aria-expanded={tools}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition-colors hover:border-black/20 hover:text-neutral-900"
-        >
-          <PanelLeft size={12} className="text-neutral-400" />
-          {tools ? "Hide tools" : "Show tools"}
-        </button>
-        <span className="ml-1 text-[12px] font-medium text-neutral-500">Add step</span>
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-black/[0.07] px-3 py-2.5">
+        <IconButton
+          label={rail ? "Hide the workflow list" : "Show the workflow list"}
+          Icon={PanelLeft}
+          pressed={rail}
+          onClick={() => setPanel({ rail: !rail })}
+        />
+        <IconButton
+          label={tools ? "Hide the MCP tools" : "Show the MCP tools"}
+          Icon={Blocks}
+          pressed={tools}
+          onClick={() => setPanel({ tools: !tools })}
+        />
+        <span aria-hidden className="mx-1 h-5 w-px bg-black/[0.08]" />
+        <span className="text-[12px] font-medium text-neutral-500">Add step</span>
         {KIND_ORDER.map((kind) => {
           const k = STEP_KINDS[kind];
           return (
             <button
               key={kind}
               type="button"
-              draggable
+              draggable={!locked}
+              disabled={locked}
               onDragStart={(e) => {
                 e.dataTransfer.setData(DND_KIND, kind);
                 e.dataTransfer.effectAllowed = "move";
               }}
               onClick={() => addStep(kind)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition-colors hover:border-black/20 hover:text-neutral-900"
+              className={BTN}
             >
               <k.Icon size={12} className="text-neutral-400" />
               {k.label}
@@ -681,31 +950,91 @@ function Canvas({
           );
         })}
 
-        {draftAt != null && (
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-[12px] text-neutral-400">
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          {draftAt != null && (
+            <span className="mr-1 text-[12px] text-neutral-400">
               Draft saved <span className="tnum">{clock(draftAt)}</span>
             </span>
-            <button
-              type="button"
-              onClick={resetToSaved}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[12.5px] font-medium text-neutral-700 transition-colors hover:border-black/20 hover:text-neutral-900"
-            >
-              <RotateCcw size={12} className="text-neutral-400" /> Reset to saved
-            </button>
-          </div>
-        )}
+          )}
+          <IconButton label="Fit the graph to the pane" Icon={Maximize2} onClick={() => void fitView(FIT)} />
+          <IconButton label="Zoom out" Icon={Minus} onClick={() => void zoomOut({ duration: 160 })} />
+          <IconButton label="Zoom in" Icon={Plus} onClick={() => void zoomIn({ duration: 160 })} />
+          <IconButton
+            label={locked ? "Unlock the canvas" : "Lock the canvas"}
+            Icon={locked ? Lock : LockOpen}
+            pressed={locked}
+            onClick={() => {
+              setPanel({ locked: !locked });
+              toast(locked ? "Canvas unlocked" : "Canvas locked — steps can be read, not moved");
+            }}
+          />
+          <span aria-hidden className="mx-1 h-5 w-px bg-black/[0.08]" />
+          <button type="button" onClick={saveNow} className={BTN}>
+            <Save size={12} className="text-neutral-400" /> Save
+          </button>
+          <IconButton
+            label="Revert to the saved workflow"
+            Icon={RotateCcw}
+            onClick={resetToSaved}
+            disabled={draftAt == null}
+          />
+          <IconButton label="Download the workflow as JSON" Icon={Download} onClick={downloadJson} />
+          <button
+            type="button"
+            onClick={() => onRun?.()}
+            disabled={!onRun || busy}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-white transition-colors",
+              !onRun || busy ? "cursor-not-allowed bg-neutral-300" : "bg-neutral-900 hover:bg-neutral-800"
+            )}
+          >
+            <Play size={12} /> {running ? "Running…" : "Run"}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col md:h-[520px] md:flex-row">
-        {tools && <McpPalette onAdd={(tool) => addTool(tool, centre())} />}
+        {/* One column for both rails: two of them would leave the pane too
+            narrow to read a chain in. A grid, not a flex column, because the
+            palette sizes itself for a flex ROW parent — as a grid item its
+            own shrink rules are inert and the 1fr track can scroll it. */}
+        {(rail || tools) && (
+          <div
+            className={cn(
+              "grid min-h-0 md:w-[218px] md:shrink-0",
+              rail && tools ? "md:grid-rows-[auto_minmax(0,1fr)]" : "md:grid-rows-[minmax(0,1fr)]"
+            )}
+          >
+            {rail && (
+              <WorkflowRail
+                workflows={workflows ?? [workflow]}
+                currentId={workflow.id}
+                stacked={tools}
+                onOpen={(id) => onOpen?.(id)}
+              />
+            )}
+            {tools && (
+              <McpPalette
+                onAdd={(tool) => {
+                  if (blocked()) return;
+                  addTool(tool, centre());
+                }}
+              />
+            )}
+          </div>
+        )}
 
         <div
           ref={pane}
           onDrop={onDrop}
           onDragOver={(e) => {
             e.preventDefault();
-            e.dataTransfer.dropEffect = e.dataTransfer.types.includes(DND_MCP_TOOL) ? "copy" : "move";
+            // A locked canvas says so with the cursor, before the drop happens.
+            e.dataTransfer.dropEffect = locked
+              ? "none"
+              : e.dataTransfer.types.includes(DND_MCP_TOOL)
+                ? "copy"
+                : "move";
             if (!dropping) setDropping(true);
           }}
           onDragLeave={(e) => {
@@ -714,14 +1043,20 @@ function Canvas({
             if (!to || !e.currentTarget.contains(to)) setDropping(false);
           }}
           className={cn(
-            "relative h-[380px] min-w-0 bg-[#fbfbfb] md:h-auto md:flex-1",
-            dropping && "ring-2 ring-inset ring-accent/40"
+            "relative h-[380px] min-w-0 bg-[#0e0f11] md:h-auto md:flex-1",
+            dropping && (locked ? "ring-2 ring-inset ring-rose-500/50" : "ring-2 ring-inset ring-accent/50")
           )}
         >
+          {locked && (
+            <span className="pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/50 px-2 py-1 text-[11px] font-medium text-white/70">
+              <Lock size={11} /> Locked
+            </span>
+          )}
+
           {nodes.length === 0 && (
             <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center px-6 text-center">
-              <p className="text-[14px] font-medium text-neutral-800">No steps yet</p>
-              <p className="mt-1.5 max-w-[38ch] text-[13px] leading-relaxed text-neutral-500">
+              <p className="text-[14px] font-medium text-neutral-100">No steps yet</p>
+              <p className="mt-1.5 max-w-[38ch] text-[13px] leading-relaxed text-white/50">
                 Add a trigger to arm the chain, then a paid call for the work it should buy — or
                 drag an MCP tool in from the left.
               </p>
@@ -733,28 +1068,33 @@ function Canvas({
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onDelete={onGraphDelete}
+            onNodeClick={() => setPanel({ tab: "properties" })}
+            onEdgeClick={() => setPanel({ tab: "properties" })}
             isValidConnection={isValidConnection}
             nodeTypes={nodeTypes}
             defaultEdgeOptions={defaultEdgeOptions}
             connectionLineType={ConnectionLineType.SmoothStep}
-            deleteKeyCode={["Backspace", "Delete"]}
+            nodesDraggable={!locked}
+            nodesConnectable={!locked}
+            deleteKeyCode={locked ? null : ["Backspace", "Delete"]}
             fitView
             fitViewOptions={FIT}
             minZoom={0.4}
             maxZoom={1.6}
             // The canvas sits inside a scrolling page, so the wheel belongs to
-            // the page and zoom belongs to the controls.
+            // the page and zoom belongs to the toolbar.
             zoomOnScroll={false}
             preventScrolling={false}
             className="rf-canvas"
           >
-            <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="rgba(0,0,0,0.13)" />
-            <Controls showInteractive={false} fitViewOptions={FIT} />
+            <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="rgba(255,255,255,0.14)" />
             <MiniMap<StepNode>
               pannable
               zoomable
               ariaLabel="Workflow overview"
-              maskColor="rgba(0,0,0,0.06)"
+              maskColor="rgba(0,0,0,0.55)"
+              bgColor="#141517"
               nodeStrokeWidth={0}
               nodeBorderRadius={3}
               nodeColor={(n) => {
@@ -768,52 +1108,222 @@ function Canvas({
         </div>
 
         <Inspector
-          key={selectedNode ? `${selectedNode.id}:${selectedNode.type}` : (selectedEdge?.id ?? "none")}
+          tab={tab}
+          onTab={(next) => setPanel({ tab: next })}
+          workflow={workflow}
           node={selectedNode}
           edge={selectedEdge}
           nodes={nodes}
           catalogue={catalogue}
+          locked={locked}
+          runs={activity.runs}
+          edits={activity.edits}
           onUpdate={updateStep}
           onDeleteStep={deleteStep}
           onDeleteLink={deleteLink}
           onSelect={select}
+          onClear={clearCanvas}
+          onRename={onRename ? rename : undefined}
+          onDelete={onDelete ? () => setConfirmDelete(true) : undefined}
         />
       </div>
+
+      <Modal
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title={`Delete ${workflow.name}?`}
+        description="The workflow, its draft graph and its run and edit history are removed from this device. This cannot be undone."
+      >
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(false)}
+            className="rounded-lg border border-black/10 px-3 py-1.5 text-[13px] font-medium text-neutral-700 transition-colors hover:border-black/20"
+          >
+            Keep it
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmDelete(false);
+              onDelete?.();
+            }}
+            className="rounded-lg bg-rose-600 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-rose-700"
+          >
+            Delete workflow
+          </button>
+        </div>
+      </Modal>
     </Sheet>
   );
 }
 
 /* ── inspector ─────────────────────────────────────────────────────────── */
 
+type Tab = "properties" | "runs" | "history";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "properties", label: "Properties" },
+  { id: "runs", label: "Runs" },
+  { id: "history", label: "History" },
+];
+
 function Inspector({
+  tab,
+  onTab,
+  workflow,
   node,
   edge,
   nodes,
   catalogue,
+  locked,
+  runs,
+  edits,
   onUpdate,
   onDeleteStep,
   onDeleteLink,
   onSelect,
+  onClear,
+  onRename,
+  onDelete,
 }: {
+  tab: Tab;
+  onTab: (t: Tab) => void;
+  workflow: Workflow;
   node: StepNode | null;
   edge: Edge | null;
   nodes: StepNode[];
   catalogue: Map<string, McpTool>;
+  locked: boolean;
+  runs: WorkflowRun[];
+  edits: WorkflowEdit[];
   onUpdate: (id: string, patch: Partial<StepData> & { kind?: StepKind }) => void;
   onDeleteStep: (id: string) => void;
   onDeleteLink: (id: string) => void;
   onSelect: (id: string) => void;
+  onClear: () => void;
+  onRename?: (patch: { name?: string; summary?: string }) => void;
+  onDelete?: () => void;
+}) {
+  const counts: Record<Tab, number | null> = { properties: null, runs: runs.length, history: edits.length };
+
+  /** Arrow keys walk the tab strip, and focus follows so the roving tabindex
+   *  never strands the keyboard on a tab that has left the tab order. */
+  function onTabKey(e: ReactKeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const i = TABS.findIndex((t) => t.id === tab);
+    const next = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length].id;
+    onTab(next);
+    document.getElementById(`wf-tab-${next}`)?.focus();
+  }
+
+  return (
+    <aside className="flex min-h-0 flex-col border-t border-black/[0.07] md:w-[288px] md:shrink-0 md:border-l md:border-t-0">
+      <div
+        role="tablist"
+        aria-label="Workflow inspector"
+        onKeyDown={onTabKey}
+        className="flex items-center gap-0.5 border-b border-black/[0.07] px-2 py-1.5"
+      >
+        {TABS.map((t) => {
+          const on = tab === t.id;
+          const count = counts[t.id];
+          return (
+            <button
+              key={t.id}
+              id={`wf-tab-${t.id}`}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              aria-controls={`wf-panel-${t.id}`}
+              tabIndex={on ? 0 : -1}
+              onClick={() => onTab(t.id)}
+              className={cn(
+                "rounded-lg px-2 py-1 text-[12.5px] font-medium transition-colors",
+                on ? "bg-black/[0.055] text-neutral-900" : "text-neutral-500 hover:text-neutral-900"
+              )}
+            >
+              {t.label}
+              {count != null && count > 0 && (
+                <span className="tnum ml-1.5 text-[11px] text-neutral-400">{count}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        id={`wf-panel-${tab}`}
+        role="tabpanel"
+        aria-labelledby={`wf-tab-${tab}`}
+        tabIndex={0}
+        className="min-h-0 flex-1 overflow-y-auto p-3.5 md:overflow-y-auto"
+      >
+        {tab === "properties" && (
+          <PropertiesPanel
+            // Remounted per selection so the price field re-seeds from the step
+            // it is now editing rather than holding the last one's text.
+            key={node ? `${node.id}:${node.type}` : (edge?.id ?? "workflow")}
+            workflow={workflow}
+            node={node}
+            edge={edge}
+            nodes={nodes}
+            catalogue={catalogue}
+            locked={locked}
+            onUpdate={onUpdate}
+            onDeleteStep={onDeleteStep}
+            onDeleteLink={onDeleteLink}
+            onSelect={onSelect}
+            onClear={onClear}
+            onRename={onRename}
+            onDelete={onDelete}
+          />
+        )}
+        {tab === "runs" && <RunsPanel runs={runs} />}
+        {tab === "history" && <HistoryPanel edits={edits} />}
+      </div>
+    </aside>
+  );
+}
+
+function PropertiesPanel({
+  workflow,
+  node,
+  edge,
+  nodes,
+  catalogue,
+  locked,
+  onUpdate,
+  onDeleteStep,
+  onDeleteLink,
+  onSelect,
+  onClear,
+  onRename,
+  onDelete,
+}: {
+  workflow: Workflow;
+  node: StepNode | null;
+  edge: Edge | null;
+  nodes: StepNode[];
+  catalogue: Map<string, McpTool>;
+  locked: boolean;
+  onUpdate: (id: string, patch: Partial<StepData> & { kind?: StepKind }) => void;
+  onDeleteStep: (id: string) => void;
+  onDeleteLink: (id: string) => void;
+  onSelect: (id: string) => void;
+  onClear: () => void;
+  onRename?: (patch: { name?: string; summary?: string }) => void;
+  onDelete?: () => void;
 }) {
   const [price, setPrice] = useState(node?.data.price != null ? usd(node.data.price, 3) : "");
   const [err, setErr] = useState<string | null>(null);
-
-  const shell = "min-w-0 border-t border-black/[0.07] p-4 md:w-[264px] md:shrink-0 md:overflow-y-auto md:border-l md:border-t-0";
 
   if (edge) {
     const from = nodes.find((n) => n.id === edge.source);
     const to = nodes.find((n) => n.id === edge.target);
     return (
-      <aside className={shell}>
+      <>
         <h3 className="text-[13px] font-semibold text-neutral-900">Connection</h3>
         <p className="mt-2 text-[13px] leading-relaxed text-neutral-600">
           {from?.data.name ?? "—"}
@@ -821,45 +1331,115 @@ function Inspector({
           <span className="mx-1.5 text-neutral-300">→</span>
           {to?.data.name ?? "—"}
         </p>
-        <button
-          type="button"
-          onClick={() => onDeleteLink(edge.id)}
-          className="mt-4 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-rose-600 transition-colors hover:bg-rose-50"
-        >
-          <Trash2 size={13} /> Delete connection
-        </button>
-      </aside>
+        {locked ? (
+          <p className="mt-4 text-[12.5px] leading-relaxed text-neutral-400">
+            The canvas is locked, so connections cannot be removed.
+          </p>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onDeleteLink(edge.id)}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-rose-600 transition-colors hover:bg-rose-50"
+          >
+            <Trash2 size={13} /> Delete connection
+          </button>
+        )}
+      </>
     );
   }
 
   if (!node) {
     return (
-      <aside className={shell}>
-        <h3 className="text-[13px] font-semibold text-neutral-900">Nothing selected</h3>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-neutral-500">
-          Pick a step to rename it, change its kind or set what a call costs. Drag from a
-          step&rsquo;s right edge to the next one to wire them together, and Delete removes
-          whatever is selected.
-        </p>
-        <ul className="mt-4 space-y-1.5">
-          {nodes.map((n) => {
-            const k = STEP_KINDS[n.type];
-            return (
-              <li key={n.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(n.id)}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-black/[0.03]"
-                >
-                  <k.Icon size={12} className="shrink-0 text-neutral-400" />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-neutral-700">{n.data.name}</span>
-                  <span className="shrink-0 text-[11px] text-neutral-400">{k.label}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </aside>
+      <>
+        <label className="block">
+          <span className="text-[12.5px] font-medium text-neutral-700">Workflow name</span>
+          <input
+            value={workflow.name}
+            onChange={(e) => onRename?.({ name: e.target.value })}
+            disabled={!onRename}
+            className={cn(FIELD, "mt-1.5")}
+          />
+        </label>
+
+        <label className="mt-3 block">
+          <span className="text-[12.5px] font-medium text-neutral-700">Description</span>
+          <textarea
+            value={workflow.summary}
+            onChange={(e) => onRename?.({ summary: e.target.value })}
+            disabled={!onRename}
+            rows={3}
+            className={cn(FIELD, "mt-1.5 resize-y leading-relaxed")}
+          />
+        </label>
+
+        <div className="mt-3 flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-medium text-neutral-700">Workflow id</div>
+            <div className="truncate font-mono text-[11.5px] text-neutral-400">{workflow.id}</div>
+          </div>
+          <CopyButton text={workflow.id} what="the workflow id" className="ml-auto" />
+        </div>
+
+        <dl className="mt-3 space-y-1 border-t border-black/[0.06] pt-2.5 text-[12px]">
+          {[
+            ["Trigger", workflow.trigger],
+            ["Steps", `${nodes.length}`],
+            ["Cost / run", `${usd(workflow.costPerRun, 3)} USDC`],
+          ].map(([k, v]) => (
+            <div key={k} className="flex items-baseline gap-2">
+              <dt className="text-neutral-400">{k}</dt>
+              <dd className="tnum ml-auto text-neutral-700">{v}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <h4 className="mt-4 text-[12.5px] font-medium text-neutral-700">Steps</h4>
+        {nodes.length === 0 ? (
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-neutral-500">
+            Nothing on the canvas yet. Add a step from the toolbar, or drag an MCP tool in from
+            the palette.
+          </p>
+        ) : (
+          <ul className="mt-1.5 space-y-0.5">
+            {nodes.map((n) => {
+              const k = STEP_KINDS[n.type];
+              return (
+                <li key={n.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(n.id)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-black/[0.03]"
+                  >
+                    <k.Icon size={12} className="shrink-0 text-neutral-400" />
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] text-neutral-700">{n.data.name}</span>
+                    <span className="shrink-0 text-[11px] text-neutral-400">{k.label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <div className="mt-5 flex flex-wrap gap-1.5 border-t border-black/[0.06] pt-3">
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={locked || nodes.length === 0}
+            className={BTN}
+          >
+            <Trash2 size={12} className="text-neutral-400" /> Clear canvas
+          </button>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-rose-600 transition-colors hover:bg-rose-50"
+            >
+              <Trash2 size={12} /> Delete workflow
+            </button>
+          )}
+        </div>
+      </>
     );
   }
 
@@ -892,7 +1472,7 @@ function Inspector({
   }
 
   return (
-    <aside className={shell}>
+    <>
       <div className="flex items-center gap-2">
         <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-md", k.chip)}>
           <k.Icon size={13} />
@@ -900,13 +1480,20 @@ function Inspector({
         <h3 className="text-[13px] font-semibold text-neutral-900">{step.type === "mcp" ? "MCP step" : "Step"}</h3>
       </div>
 
+      {locked && (
+        <p className="mt-2 text-[12px] leading-relaxed text-neutral-400">
+          The canvas is locked. Unlock it from the toolbar to edit this step.
+        </p>
+      )}
+
       <label className="mt-4 block">
         <span className="text-[12.5px] font-medium text-neutral-700">Name</span>
         <input
           value={step.data.name}
           onChange={(e) => onUpdate(step.id, { name: e.target.value })}
           placeholder={k.blank}
-          className="mt-1.5 w-full rounded-lg border border-black/10 px-3 py-2 text-[13.5px] outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-400"
+          disabled={locked}
+          className={cn(FIELD, "mt-1.5")}
         />
       </label>
 
@@ -915,7 +1502,8 @@ function Inspector({
         <select
           value={step.type}
           onChange={(e) => onUpdate(step.id, { kind: e.target.value as StepKind })}
-          className="mt-1.5 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-[13.5px] outline-none focus:border-neutral-400"
+          disabled={locked}
+          className={cn(FIELD, "mt-1.5")}
         >
           {kinds.map((kind) => (
             <option key={kind} value={kind}>
@@ -932,7 +1520,8 @@ function Inspector({
             <select
               value={tool?.id ?? ""}
               onChange={(e) => commitTool(e.target.value)}
-              className="mt-1.5 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-[13.5px] outline-none focus:border-neutral-400"
+              disabled={locked}
+              className={cn(FIELD, "mt-1.5")}
             >
               {!tool && <option value="">{step.data.tool ?? "No tool"} — not attached</option>}
               {[...catalogue.values()].map((t) => (
@@ -982,7 +1571,8 @@ function Inspector({
             onChange={(e) => commitPrice(e.target.value)}
             inputMode="decimal"
             placeholder="0.000"
-            className="tnum mt-1.5 w-full rounded-lg border border-black/10 px-3 py-2 text-[13.5px] outline-none focus:border-neutral-400"
+            disabled={locked}
+            className={cn(FIELD, "tnum mt-1.5")}
           />
           {err ? (
             <span className="mt-1.5 block text-[12px] text-rose-600">{err}</span>
@@ -996,13 +1586,15 @@ function Inspector({
         </label>
       )}
 
-      <button
-        type="button"
-        onClick={() => onDeleteStep(step.id)}
-        className="mt-5 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-rose-600 transition-colors hover:bg-rose-50"
-      >
-        <Trash2 size={13} /> Delete step
-      </button>
-    </aside>
+      {!locked && (
+        <button
+          type="button"
+          onClick={() => onDeleteStep(step.id)}
+          className="mt-5 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-rose-600 transition-colors hover:bg-rose-50"
+        >
+          <Trash2 size={13} /> Delete step
+        </button>
+      )}
+    </>
   );
 }

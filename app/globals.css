@@ -131,30 +131,20 @@ a:focus-visible,
   outline-offset: 2px;
 }
 
-/* Workflow edges "flow" while a run is in progress. The class lands on the
-   edge group, so the path is named too rather than relying on inheritance. */
-.edge-flow,
-.edge-flow .react-flow__edge-path {
-  stroke-dasharray: 6 6;
-  animation: edgeFlow 0.9s linear infinite;
-}
+/* The drift that makes a workflow edge read as a pipe with something in it.
+   Where it is applied — and how fast — lives with the canvas rules below. */
 @keyframes edgeFlow {
   to {
     stroke-dashoffset: -12;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .edge-flow,
-  .edge-flow .react-flow__edge-path {
-    stroke-dasharray: none;
-    animation: none;
   }
 }
 
 /* Live figures must not reflow as they change. */
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
-/* ---------- React Flow, dressed to match the rest of the app ----------
+/* ---------- React Flow: the one dark surface in a light app ----------
+   A graph reads better against ink than against paper, so the builder's pane —
+   and only the pane — is dark. Everything framing it stays the light app.
    React Flow's own stylesheet is imported from a component module, so it lands
    after globals.css and wins on equal specificity. Every rule below is scoped
    to .rf-canvas to sit one class higher and take the tie. */
@@ -163,54 +153,48 @@ a:focus-visible,
   width: 9px;
   height: 9px;
   border-radius: 999px;
-  background: #ffffff;
-  border: 1.5px solid rgba(0, 0, 0, 0.25);
+  background: #0e0f11;
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
   transition: border-color 120ms, background-color 120ms;
 }
 .rf-canvas .react-flow__handle:hover,
 .rf-canvas .react-flow__handle.connectingfrom,
 .rf-canvas .react-flow__handle.connectingto {
   border-color: var(--accent);
-  background: #fff3ec;
+  background: rgba(255, 107, 43, 0.35);
 }
-.rf-canvas .react-flow__edge-path { stroke: rgba(0, 0, 0, 0.22); stroke-width: 1.5; }
+
+/* Every edge drifts slowly — a workflow is a pipeline, not a diagram — and the
+   step a run is standing on drifts fast enough to pick out at a glance. */
+.rf-canvas .react-flow__edge-path {
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 6;
+  animation: edgeFlow 2.4s linear infinite;
+}
+.rf-canvas .edge-flow .react-flow__edge-path { animation-duration: 0.9s; }
 .rf-canvas .react-flow__edge.selected .react-flow__edge-path,
 .rf-canvas .react-flow__edge:focus .react-flow__edge-path { stroke: var(--accent); stroke-width: 2; }
 .rf-canvas .react-flow__connection-path { stroke: var(--accent); stroke-width: 2; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-canvas .react-flow__edge-path { animation: none; }
+}
 
 /* The card draws its own border and focus ring — drop the wrapper's. */
 .rf-canvas .react-flow__node { font-family: inherit; }
 .rf-canvas .react-flow__node:focus,
 .rf-canvas .react-flow__node:focus-visible { outline: none; }
-.rf-canvas .react-flow__node.selectable:focus-visible > div { outline: 2px solid rgba(37, 99, 235, 0.55); outline-offset: 2px; }
-
-.rf-canvas .react-flow__controls {
-  box-shadow: none;
-  border: 1px solid rgba(0, 0, 0, 0.09);
-  border-radius: 10px;
-  overflow: hidden;
-  background: #ffffff;
-}
-.rf-canvas .react-flow__controls-button {
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  background: #ffffff;
-  fill: #737373;
-}
-.rf-canvas .react-flow__controls-button:last-child { border-bottom: none; }
-.rf-canvas .react-flow__controls-button:hover { background: rgba(0, 0, 0, 0.035); fill: #171717; }
+.rf-canvas .react-flow__node.selectable:focus-visible > div { outline: 2px solid rgba(147, 197, 253, 0.75); outline-offset: 2px; }
 
 .rf-canvas .react-flow__minimap {
-  border: 1px solid rgba(0, 0, 0, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   overflow: hidden;
-  background: #ffffff;
 }
 
 .rf-canvas .react-flow__attribution {
   background: transparent;
   font-size: 9px;
 }
-.rf-canvas .react-flow__attribution a { color: rgba(0, 0, 0, 0.28); }
+.rf-canvas .react-flow__attribution a { color: rgba(255, 255, 255, 0.3); }
