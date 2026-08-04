@@ -4,7 +4,8 @@ import { Activity, Bot, Keyboard, LayoutGrid, MessageSquare, Plug, Receipt, Scro
 import { Mark } from "@/components/ui/mark";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
-import { settledThisMonth, usd } from "@/lib/app-data";
+import { usd } from "@/lib/app-data";
+import { useWorkspace } from "@/lib/real-data";
 import { shortAddress } from "@/lib/algorand-address";
 import { useSettings } from "@/lib/settings";
 
@@ -37,6 +38,11 @@ export function Sidebar({
   onShortcuts: () => void;
 }) {
   const { name, payout } = useSettings();
+  // Real earnings, from settlements to the deployed agent's payout address.
+  // It reads 0.00 until somebody actually pays, and that is the honest number.
+  const { data: ws } = useWorkspace();
+  const earned = ws?.mine.earnedUsdc ?? 0;
+  const calls = ws?.mine.calls ?? 0;
   const initials = name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 
   return (
@@ -85,13 +91,13 @@ export function Sidebar({
 
       <div className="mt-auto space-y-2 p-2.5">
         <div className="rounded-xl border border-black/[0.08] bg-white p-3">
-          <div className="text-[11.5px] text-neutral-500">Settled this month</div>
+          <div className="text-[11.5px] text-neutral-500">Settled to your address</div>
           <div className="tnum mt-0.5 text-[17px] font-semibold tracking-tight text-neutral-900">
-            {usd(settledThisMonth)}{" "}
+            {usd(earned)}{" "}
             <span className="text-[11px] font-medium text-neutral-400">USDC</span>
           </div>
-          <div className="mt-2 h-1 overflow-hidden rounded-full bg-black/[0.07]">
-            <div className="h-full w-[72%] rounded-full bg-gradient-to-r from-[#ffa756] to-[#ee602c]" />
+          <div className="mt-1 text-[11px] text-neutral-400">
+            {calls === 0 ? "no paid calls yet" : `${calls} paid ${calls === 1 ? "call" : "calls"}`}
           </div>
           <button
             type="button"
