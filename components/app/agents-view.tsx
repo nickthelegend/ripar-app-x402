@@ -14,10 +14,15 @@ const usd = (n: number, d = 2) =>
   n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 
 /**
- * There is no agent registry to read, so an agent here is defined by behaviour:
- * an address that has actually received x402 settlements. That is exactly what
- * the chain knows, and it is worth more than a directory of self-declared
- * listings — every row is backed by somebody having really paid.
+ * An agent HERE is defined by behaviour: an address that has actually received
+ * x402 settlements, read off the indexer. Nobody can list themselves into this
+ * table — you get in by being paid.
+ *
+ * There IS now a registry, and it answers a different question. The Directory
+ * view reads `ag_` boxes out of IdentityRegistry 768572968: a self-attested id,
+ * domain and controlling address. Being there proves someone registered; being
+ * here proves someone paid. Neither list contains the other, and the note below
+ * the table says so on screen rather than leaving it to be discovered.
  */
 export function AgentsView() {
   const { data, status, error } = useWorkspace();
@@ -145,6 +150,13 @@ export function AgentsView() {
       <p className="mt-2.5 text-[12px] text-neutral-400">
         {`Derived from x402 settlements on Algorand ${net}. An agent with one payer and many calls is`}{" "}
         usually one operator testing; many distinct payers is the signal worth watching.
+      </p>
+      <p className="mt-1.5 text-[12px] leading-relaxed text-neutral-400">
+        <span className="font-medium text-neutral-500">This is settlement, not registration.</span> Every row
+        is an address observed being paid — it carries no id, no domain and no owner, because the chain does
+        not record those against a payment. <span className="font-medium text-neutral-500">Directory</span>{" "}
+        reads the other side: agents that registered an id and a domain in the Identity Registry, whether or
+        not anyone has ever paid them. An agent can appear in one and not the other.
       </p>
 
       <SlideOver open={!!open} onClose={() => setOpen(null)} title="Agent" width="max-w-lg">

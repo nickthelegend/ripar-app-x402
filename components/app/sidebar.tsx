@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Bot, Keyboard, LayoutGrid, MessageSquare, Plug, Receipt, Search, Settings, Wallet } from "lucide-react";
+import { Activity, BadgePlus, Bot, BookUser, ClipboardList, Keyboard, LayoutGrid, MessageSquare, Plug, Receipt, Search, Settings, Wallet } from "lucide-react";
 import { Mark } from "@/components/ui/mark";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,11 @@ import { useSettings } from "@/lib/settings";
 // read — it serves no run or log route — so the surface was showing lines
 // generated in the browser. Removed rather than left as a convincing fiction.
 export type View =
-  | "overview" | "chat" | "endpoints" | "workflows" | "agents" | "receipts" | "settings";
+  | "overview" | "chat" | "endpoints" | "workflows" | "agents" | "receipts" | "settings"
+  // The three registry surfaces. They read the ERC-8004 apps on TestNet rather
+  // than settlement history, which is a different definition of "agent" — see
+  // the note at the top of directory-view.tsx.
+  | "directory" | "board" | "register";
 
 export const NAV: { id: View; label: string; Icon: typeof Activity }[] = [
   { id: "overview", label: "Overview", Icon: LayoutGrid },
@@ -23,6 +27,9 @@ export const NAV: { id: View; label: string; Icon: typeof Activity }[] = [
   { id: "workflows", label: "Workflows", Icon: Activity },
   { id: "agents", label: "Agents", Icon: Bot },
   { id: "receipts", label: "Receipts", Icon: Receipt },
+  { id: "directory", label: "Directory", Icon: BookUser },
+  { id: "board", label: "Job board", Icon: ClipboardList },
+  { id: "register", label: "Register", Icon: BadgePlus },
 ];
 
 export function Sidebar({

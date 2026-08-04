@@ -16,6 +16,9 @@ import { WorkflowsView } from "./workflows-view";
 import { AgentsView } from "./agents-view";
 import { ReceiptsView } from "./receipts-view";
 import { SettingsView } from "./settings-view";
+import { DirectoryView } from "./directory-view";
+import { BoardView } from "./board-view";
+import { RegisterView } from "./register-view";
 import { ChordHint, ShortcutsOverlay, useShortcuts } from "./shortcuts";
 
 export function AppShell() {
@@ -92,6 +95,9 @@ export function AppShell() {
           {view === "agents" && <AgentsView />}
           {view === "receipts" && <ReceiptsView />}
           {view === "settings" && <SettingsView />}
+          {view === "directory" && <DirectoryView />}
+          {view === "board" && <BoardView />}
+          {view === "register" && <RegisterView />}
         </main>
       </div>
 

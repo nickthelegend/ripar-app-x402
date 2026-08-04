@@ -27,33 +27,25 @@ const cards = [
   { title: "Create Deployment", desc: "Ship projects to production.", Icon: Rocket },
 ];
 
-const gauges = [
-  { label: "Credits", value: "3%", sub: "68,766 / 2,000,000" },
-  { label: "Projects", value: "1%", sub: "49 total" },
-  { label: "Users", value: "0%", sub: "Team members" },
+// Prices and settings — things an operator CONFIGURES — never totals.
+//
+// This block used to be three usage gauges: "Credits 3% · 68,766 / 2,000,000",
+// "Projects 1% · 49 total", "Users 0%". Nobody has 68,766 credits here and
+// there are no 49 projects; those were adoption figures drawn on a login page,
+// and a reader has no way to tell a decorative number from a measured one. A
+// price describes the product. A cumulative total is a claim.
+const settings = [
+  { label: "Per call", value: "0.01", sub: "USDC, quoted in the 402" },
+  { label: "Settles to", value: "your wallet", sub: "Ripar never holds it" },
+  { label: "Network", value: "Algorand", sub: "USDC, six decimals" },
 ];
 
-function Gauge({ value, label, sub }: { value: string; label: string; sub: string }) {
+function Setting({ value, label, sub }: { value: string; label: string; sub: string }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
       <div className="text-[9px] font-medium text-white/50">{label}</div>
-      <div className="mt-3 flex items-end justify-center">
-        <div className="relative flex h-14 w-14 items-center justify-center">
-          <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
-            <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-            <circle
-              cx="18"
-              cy="18"
-              r="15"
-              fill="none"
-              stroke="#ff6b2b"
-              strokeWidth="3"
-              strokeDasharray={`${(parseInt(value) / 100) * 94} 94`}
-              strokeLinecap="round"
-            />
-          </svg>
-          <span className="absolute text-sm font-semibold text-white">{value}</span>
-        </div>
+      <div className="mt-3 flex h-14 items-center justify-center">
+        <span className="text-center text-sm font-semibold leading-tight text-white">{value}</span>
       </div>
       <div className="mt-2 text-center text-[8px] text-white/30">{sub}</div>
     </div>
@@ -78,7 +70,7 @@ export function DashboardPreview() {
                 </span>
                 <div className="leading-tight">
                   <div className="text-[11px] font-semibold">Ripar</div>
-                  <div className="text-[8px] text-white/40">3% used credits</div>
+                  <div className="text-[8px] text-white/40">Algorand TestNet</div>
                 </div>
               </div>
               <div className="space-y-0.5">
@@ -99,14 +91,15 @@ export function DashboardPreview() {
                 <div>demo-uriach</div>
                 <div>demo-carbonell</div>
               </div>
+              {/* No "credits used" bar. There are no credits and no plan to
+                  upgrade — Ripar is paid per request, in the 402, and there is
+                  nothing to top up. A meter drawn here would be a fiction about
+                  the pricing model, not just about the number. */}
               <div className="mt-4 rounded-lg border border-white/10 p-2">
-                <div className="text-[8px] text-white/40">Credits used</div>
-                <div className="mt-1 h-1 rounded-full bg-white/10">
-                  <div className="h-1 w-[6%] rounded-full bg-[#ff6b2b]" />
+                <div className="text-[8px] text-white/40">Billing</div>
+                <div className="mt-1 text-[9px] leading-tight text-white/60">
+                  Per request. No plan, no seats, nothing to top up.
                 </div>
-                <button className="mt-2 w-full rounded-md bg-white/10 py-1 text-[9px] font-medium">
-                  Upgrade plan
-                </button>
               </div>
             </div>
 
@@ -124,10 +117,10 @@ export function DashboardPreview() {
                 ))}
               </div>
 
-              <div className="mt-5 text-[11px] font-medium text-white/70">Usage Overview</div>
+              <div className="mt-5 text-[11px] font-medium text-white/70">Settlement</div>
               <div className="mt-2 grid grid-cols-3 gap-2">
-                {gauges.map((g) => (
-                  <Gauge key={g.label} {...g} />
+                {settings.map((s) => (
+                  <Setting key={s.label} {...s} />
                 ))}
               </div>
 
@@ -149,16 +142,18 @@ export function DashboardPreview() {
         </div>
       </div>
 
-      
+      {/* A "Trusted by" strip naming Uriach, BENITO, Schneider and GIRBAU used
+          to sit here. None of them is a customer. Four real companies presented
+          as logos on a login page is a stronger claim than any number on this
+          screen, and it was the least true thing in the app. */}
       <div className="absolute bottom-14 left-1/2 w-[440px] -translate-x-1/2 rounded-2xl border border-white/20 bg-neutral-900/40 p-6 backdrop-blur-md">
-        <div className="text-[11px] font-semibold uppercase tracking-widest text-white/60">Trusted by</div>
-        <div className="mt-4 flex items-center justify-between gap-4 opacity-80">
-          {["Uriach", "BENITO", "Schneider", "GIRBAU"].map((n) => (
-            <span key={n} className="font-serif text-lg font-bold tracking-tight text-white/80">
-              {n}
-            </span>
-          ))}
+        <div className="text-[11px] font-semibold uppercase tracking-widest text-white/60">
+          How you get paid
         </div>
+        <p className="mt-3 text-[12px] leading-relaxed text-white/70">
+          A caller with no account gets a 402 carrying your price, attaches USDC and retries. Settlement lands
+          in your own Algorand address — Ripar never holds it.
+        </p>
       </div>
     </div>
   );
