@@ -14,10 +14,37 @@ import { AGENT_ORIGIN, MANIFEST_ROUTE } from "./agent-origin";
  * A dashboard that fabricates its own contents is worth less than an empty one.
  */
 
-const ALGOD = "https://mainnet-api.algonode.cloud";
-const INDEXER = "https://mainnet-idx.algonode.cloud";
-const FEE_PAYER = "ZMFK2OI7ZBD2U27ISERZC4S6LKM6WMFJPZQ4MYNJDZ2VNBNMBA67RA22AA";
-const USDC = 31_566_704;
+/**
+ * Which chain to read.
+ *
+ * This used to be hardcoded to MainNet while the agent settles on TestNet — so
+ * "Paid calls received" and "Earned" were pinned at zero STRUCTURALLY. They
+ * would have stayed zero even if somebody paid, because we were looking at a
+ * different ledger. An honest zero and a zero you cannot move look identical
+ * on screen, which is what made it worth fixing rather than explaining.
+ *
+ * The manifest declares the network, so follow it rather than assuming.
+ */
+export type ChainNetwork = "mainnet" | "testnet";
+
+const CHAIN: Record<ChainNetwork, { algod: string; indexer: string; usdc: number; feePayer: string }> = {
+  mainnet: {
+    algod: "https://mainnet-api.algonode.cloud",
+    indexer: "https://mainnet-idx.algonode.cloud",
+    usdc: 31_566_704,
+    feePayer: "ZMFK2OI7ZBD2U27ISERZC4S6LKM6WMFJPZQ4MYNJDZ2VNBNMBA67RA22AA",
+  },
+  testnet: {
+    algod: "https://testnet-api.algonode.cloud",
+    indexer: "https://testnet-idx.algonode.cloud",
+    usdc: 10_458_941,
+    // The GoPlausible facilitator sponsors fees from its own account, and its
+    // history is how a settlement group is found. If it uses a different one on
+    // TestNet this walk finds nothing — which is why the view says how many
+    // settlements it saw rather than implying it saw them all.
+    feePayer: "ZMFK2OI7ZBD2U27ISERZC4S6LKM6WMFJPZQ4MYNJDZ2VNBNMBA67RA22AA",
+  },
+};
 
 /** Re-exported so the views keep one import for the workspace's data. */
 export { AGENT_ORIGIN };
@@ -110,7 +137,8 @@ export type RealRun = {
   to: string;
 };
 
-async function fetchSettlements(signal?: AbortSignal, cap = 40): Promise<RealRun[]> {
+async function fetchSettlements(net: ChainNetwork, signal?: AbortSignal, cap = 40): Promise<RealRun[]> {
+  const { indexer: INDEXER, usdc: USDC, feePayer: FEE_PAYER } = CHAIN[net];
   const legs = await j<{ transactions?: Record<string, unknown>[] }>(
     `${INDEXER}/v2/accounts/${FEE_PAYER}/transactions?limit=120`,
     signal
@@ -197,7 +225,9 @@ export type Workspace = {
   endpoints: RealEndpoint[];
   runs: RealRun[];
   agents: RealAgent[];
-  chain: { round: number | null; blockTime: number | null };
+  /** `network` is the chain these rows were actually read from, so a view can
+   *  link a transaction to the right explorer instead of assuming MainNet. */
+  chain: { network: ChainNetwork; round: number | null; blockTime: number | null };
   /**
    * Settlements to OUR payout address specifically. Agent-wide by necessity —
    * a payment names the address it pays, never the endpoint it paid for.
@@ -219,13 +249,20 @@ export function useWorkspace(): Loadable<Workspace> {
 
     async function load() {
       try {
-        // The manifest is our own agent describing itself; the settlements are
-        // the chain describing everyone. Neither is invented here.
-        const [manifest, runs, status] = await Promise.all([
-          // Through this app's own origin, not the agent's: the agent sends no
-          // CORS header, so a browser is not allowed to read it directly.
-          j<Manifest>(MANIFEST_ROUTE, ac.signal).catch(() => null),
-          fetchSettlements(ac.signal),
+        // The manifest comes FIRST, on its own, because it names the network.
+        // Fetching it alongside the chain calls meant choosing a chain before
+        // the agent had told us which one — and the choice was MainNet while
+        // the agent settles on TestNet, so every earned figure was pinned at
+        // zero and would have stayed there however much anyone paid.
+        //
+        // Through this app's own origin, not the agent's: the agent sends no
+        // CORS header, so a browser is not allowed to read it directly.
+        const manifest = await j<Manifest>(MANIFEST_ROUTE, ac.signal).catch(() => null);
+        const net: ChainNetwork = manifest?.network === "mainnet" ? "mainnet" : "testnet";
+        const { algod: ALGOD } = CHAIN[net];
+
+        const [runs, status] = await Promise.all([
+          fetchSettlements(net, ac.signal),
           j<{ "last-round": number }>(`${ALGOD}/v2/status`, ac.signal),
         ]);
 
@@ -265,7 +302,7 @@ export function useWorkspace(): Loadable<Workspace> {
             endpoints,
             runs,
             agents: agentsFrom(runs, payTo),
-            chain: { round: head, blockTime },
+            chain: { network: net, round: head, blockTime },
             mine: {
               calls: mineRuns.length,
               earnedUsdc: mineRuns.reduce((s2, r) => s2 + r.amountUsdc, 0),

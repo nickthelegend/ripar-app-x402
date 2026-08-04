@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Bot, Keyboard, LayoutGrid, MessageSquare, Plug, Receipt, ScrollText, Search, Settings, Wallet } from "lucide-react";
+import { Activity, Bot, Keyboard, LayoutGrid, MessageSquare, Plug, Receipt, Search, Settings, Wallet } from "lucide-react";
 import { Mark } from "@/components/ui/mark";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
@@ -9,8 +9,11 @@ import { useWorkspace } from "@/lib/real-data";
 import { shortAddress } from "@/lib/algorand-address";
 import { useSettings } from "@/lib/settings";
 
+// No "logs": the deployed agent is a Next.js app that writes nowhere we can
+// read — it serves no run or log route — so the surface was showing lines
+// generated in the browser. Removed rather than left as a convincing fiction.
 export type View =
-  | "overview" | "chat" | "endpoints" | "workflows" | "agents" | "logs" | "receipts" | "settings";
+  | "overview" | "chat" | "endpoints" | "workflows" | "agents" | "receipts" | "settings";
 
 export const NAV: { id: View; label: string; Icon: typeof Activity }[] = [
   { id: "overview", label: "Overview", Icon: LayoutGrid },
@@ -18,7 +21,6 @@ export const NAV: { id: View; label: string; Icon: typeof Activity }[] = [
   { id: "endpoints", label: "Endpoints", Icon: Plug },
   { id: "workflows", label: "Workflows", Icon: Activity },
   { id: "agents", label: "Agents", Icon: Bot },
-  { id: "logs", label: "Logs", Icon: ScrollText },
   { id: "receipts", label: "Receipts", Icon: Receipt },
 ];
 

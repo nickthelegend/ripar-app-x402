@@ -1,5 +1,12 @@
 // Mock data for the workspace. Shaped exactly like what the API will return,
 // so swapping in a real fetch later is a change of source, not of components.
+//
+// Most of it is now orphaned. Every table that showed numbers reads lib/real-data
+// instead — the manifest and the chain — so ENDPOINTS, AGENTS, RUNS and the
+// month totals below are referenced by nothing. What this file is still imported
+// for is the shared types, STATUS_TONE, the `usd`/`costOfSteps` helpers, and
+// WORKFLOWS, which the builder offers as starter templates that state plainly
+// they have never run. Nothing here is rendered as though it had happened.
 
 export type Status = "live" | "paused" | "draft" | "error";
 export type AgentStatus = "idle" | "working" | "bidding" | "offline";
@@ -124,7 +131,12 @@ export const RUNS: Run[] = [
   { id: "run_3f70b", target: "Treasury Sweep", kind: "workflow", outcome: "ok", cost: 0.03, ms: 2100, when: "41 min ago", tx: "1D77C904" },
 ];
 
-/* ── x402 facts the console, the logs and the receipts all quote ─────────── */
+/* ── x402 facts ──────────────────────────────────────────────────────────
+   Nothing reads these any more: the test console, the Logs view and the
+   generated receipts that quoted them have all been removed, and what the
+   surfaces now show comes from the agent's manifest and the chain. Left in
+   place with the rest of the mock module rather than half-emptied — see the
+   note at the top of the file. */
 
 /** USDC on Algorand MainNet. */
 export const USDC_ASSET_ID = "31566704";

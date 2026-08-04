@@ -14,7 +14,6 @@ export const GO_KEYS: Record<string, View> = {
   e: "endpoints",
   w: "workflows",
   a: "agents",
-  l: "logs",
   r: "receipts",
   s: "settings",
 };
@@ -25,7 +24,6 @@ const VIEW_LABEL: Record<View, string> = {
   endpoints: "Endpoints",
   workflows: "Workflows",
   agents: "Agents",
-  logs: "Logs",
   receipts: "Receipts",
   settings: "Settings",
 };
@@ -113,7 +111,7 @@ export function ChordHint({ show }: { show: boolean }) {
   return (
     <div className="pointer-events-none fixed bottom-5 left-5 z-[90] flex items-center gap-2 rounded-lg bg-neutral-900 px-2.5 py-1.5 text-[12px] font-medium text-white shadow-lg">
       <Key>g</Key>
-      <span className="text-neutral-400">then o · c · e · w · a · l · r · s</span>
+      <span className="text-neutral-400">then o · c · e · w · a · r · s</span>
     </div>
   );
 }

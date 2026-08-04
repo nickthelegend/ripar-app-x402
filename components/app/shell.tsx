@@ -14,7 +14,6 @@ import { ChatView, type Turn } from "./chat-view";
 import { EndpointsView } from "./endpoints-view";
 import { WorkflowsView } from "./workflows-view";
 import { AgentsView } from "./agents-view";
-import { LogsView } from "./logs-view";
 import { ReceiptsView } from "./receipts-view";
 import { SettingsView } from "./settings-view";
 import { ChordHint, ShortcutsOverlay, useShortcuts } from "./shortcuts";
@@ -91,7 +90,6 @@ export function AppShell() {
           {view === "endpoints" && <EndpointsView />}
           {view === "workflows" && <WorkflowsView />}
           {view === "agents" && <AgentsView />}
-          {view === "logs" && <LogsView />}
           {view === "receipts" && <ReceiptsView />}
           {view === "settings" && <SettingsView />}
         </main>
