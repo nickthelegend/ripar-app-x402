@@ -22,7 +22,7 @@ type Field = "agentId" | "domain" | "registeredAt" | "jobsPaid" | "volume";
  *   Agents    — addresses that have RECEIVED x402 settlements. Derived from the
  *               indexer. Nobody declares themselves into it; you get in by
  *               being paid. It knows no names, no domains and no ids.
- *   Directory — `ag_` boxes in IdentityRegistry 768572968. A self-attested
+ *   Directory — `ag_` boxes in IdentityRegistry 768633998. A self-attested
  *               registration: an id, a domain and the address that signed for
  *               it. Being here proves somebody registered, not that anybody
  *               ever paid them.

@@ -15,7 +15,7 @@ import {
 import { PageHead, Sheet } from "./bits";
 import { ComposeRefused, UnsignedCall } from "./unsigned-txn";
 
-const IDENTITY_APP = 768_572_968;
+const IDENTITY_APP = 768_633_998;
 const peraApp = (id: number) => `https://testnet.explorer.perawallet.app/application/${id}/`;
 const peraAddress = (a: string) => `https://testnet.explorer.perawallet.app/address/${a}/`;
 
