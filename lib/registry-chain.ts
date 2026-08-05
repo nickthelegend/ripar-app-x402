@@ -55,7 +55,7 @@ export const BOX_PREFIX = {
  * cannot invite anyone to fund an escrow in the wrong asset. The name below is
  * only used for display when the read succeeds and returns this id.
  */
-export const ESCROW_ASSET_NAME = "rUSDC";
+export const ESCROW_ASSET_NAME = "USDC";
 export const ESCROW_DECIMALS = 6;
 
 export const peraApp = (appId: number) => `https://testnet.explorer.perawallet.app/application/${appId}/`;
