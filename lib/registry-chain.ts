@@ -50,13 +50,33 @@ export const BOX_PREFIX = {
 } as const;
 
 /**
- * What escrow is denominated in — read from the ValidationRegistry's own
- * `escrow_asset` global at request time rather than hardcoded, so this app
- * cannot invite anyone to fund an escrow in the wrong asset. The name below is
- * only used for display when the read succeeds and returns this id.
+ * What escrow is denominated in.
+ *
+ * The ID is read from the ValidationRegistry's own `escrow_asset` global at
+ * request time, so this app cannot invite anyone to fund an escrow in the wrong
+ * asset. The NAME used to be the constant below, and that was the hole: a real
+ * id beside a fabricated ticker. The registries are bootstrapped to a token
+ * minted for this project, so labelling every amount "USDC" described a
+ * different asset than the one being counted — and nothing notices, because the
+ * numbers are correct and only the word beside them is wrong.
+ *
+ * `assetUnitName()` asks the ASA what it calls itself. The constant survives
+ * only as the label of last resort when that read fails, and says so.
  */
-export const ESCROW_ASSET_NAME = "USDC";
+export const ESCROW_ASSET_FALLBACK_NAME = "asset";
 export const ESCROW_DECIMALS = 6;
+
+/** The ticker an ASA declares for itself. Never guessed from decimals. */
+export async function assetUnitName(assetId: number): Promise<string> {
+  if (!assetId) return ESCROW_ASSET_FALLBACK_NAME;
+  try {
+    const a = await get<{ params?: { "unit-name"?: string } }>(`${TESTNET_ALGOD}/v2/assets/${assetId}`);
+    return a.params?.["unit-name"] || `asset ${assetId}`;
+  } catch {
+    // A label we could not verify is worse than an honest id.
+    return `asset ${assetId}`;
+  }
+}
 
 export const peraApp = (appId: number) => `https://testnet.explorer.perawallet.app/application/${appId}/`;
 export const peraAddress = (a: string) => `https://testnet.explorer.perawallet.app/address/${a}/`;
@@ -473,7 +493,7 @@ export async function getEscrowTerms(): Promise<EscrowTerms> {
     validationApp: REGISTRY.validation,
     appAddress: getApplicationAddress(REGISTRY.validation).toString(),
     assetId: state.escrow_asset,
-    assetName: ESCROW_ASSET_NAME,
+    assetName: await assetUnitName(state.escrow_asset),
     disputeWindowSecs: state.dispute_window,
     identityApp: state.identity_app,
     reputationApp: state.reputation_app,
