@@ -1,3 +1,4 @@
+import { getBlock } from "./block-cache";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -74,17 +75,10 @@ export function useLiveChain(): LiveChain {
         // few rounds — the header should not fire twenty requests to draw a number.
         let volume = 0;
         const sample = [...rounds].slice(0, 6);
-        // Sequential, not a burst. Six simultaneous block reads is enough to
-        // get 429ed by the free public indexer, and the .catch below turns that
-        // into a volume figure that is quietly too low rather than an error.
+        // Same shared cache the workspace uses, so these rounds are almost
+        // always already in memory and cost no request at all.
         const blocks: any[] = [];
-        for (const r of sample) {
-          try {
-            blocks.push(await j(`${INDEXER}/v2/blocks/${r}`));
-          } catch {
-            blocks.push(null);
-          }
-        }
+        for (const r of sample) blocks.push(await getBlock(INDEXER, r));
         for (const blk of blocks) {
           for (const t of blk?.transactions ?? []) {
             const note = decode(t.note);

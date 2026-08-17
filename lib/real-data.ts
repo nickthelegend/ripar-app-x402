@@ -65,6 +65,8 @@ const decode = (b64?: string) => {
   }
 };
 
+import { getBlock, type BlockResponse } from "./block-cache";
+
 async function j<T>(url: string, signal?: AbortSignal): Promise<T> {
   // AlgoNode is a free public endpoint and it rate-limits. A 429 is not a
   // failure of the query, it is the node asking us to slow down, so retry it
@@ -77,24 +79,6 @@ async function j<T>(url: string, signal?: AbortSignal): Promise<T> {
   }
 }
 
-/**
- * Run tasks a few at a time instead of all at once.
- *
- * Twelve simultaneous block reads is what triggered the 429s: the burst, not
- * the volume. Three at a time finishes in about the same wall-clock time and
- * the public node answers all of them.
- */
-async function pooled<T>(items: T[], limit: number, run: (item: T) => Promise<void>): Promise<void> {
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (next < items.length) {
-        const i = next++;
-        await run(items[i]!);
-      }
-    })
-  );
-}
 
 /* ── real endpoints, from the agent's own published manifest ───────────── */
 
@@ -175,22 +159,12 @@ async function fetchSettlements(net: ChainNetwork, signal?: AbortSignal, cap = 4
   );
   const rounds = [...new Set(wanted.map((t) => t["confirmed-round"] as number))].slice(0, 12);
 
-  // Ordered slots, filled by a bounded pool. A dropped block used to be
-  // swallowed by `.catch(() => null)`, so a rate-limited read showed up as
-  // fewer settlements on the page and nothing anywhere said so.
-  const blocks: ({ transactions?: Record<string, any>[] } | null)[] = new Array(rounds.length).fill(null);
-  let dropped = 0;
-  await pooled(
-    rounds.map((r, i) => ({ r, i })),
-    3,
-    async ({ r, i }) => {
-      try {
-        blocks[i] = await j<{ transactions?: Record<string, any>[] }>(`${INDEXER}/v2/blocks/${r}`, signal);
-      } catch {
-        dropped++;
-      }
-    }
-  );
+  // One shared, serialised, permanently-cached reader. A confirmed block never
+  // changes, so the same round is never fetched twice however many components
+  // ask for it.
+  const blocks: (BlockResponse | null)[] = [];
+  for (const r of rounds) blocks.push(await getBlock(INDEXER, r, signal));
+  const dropped = blocks.filter((b) => b === null).length;
   if (dropped) {
     console.warn(`[ripar] ${dropped}/${rounds.length} settlement blocks could not be read; the list below is incomplete.`);
   }
