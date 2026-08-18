@@ -1,12 +1,21 @@
-// Mock data for the workspace. Shaped exactly like what the API will return,
-// so swapping in a real fetch later is a change of source, not of components.
+// Shared types and presentation helpers for the workspace.
 //
-// Most of it is now orphaned. Every table that showed numbers reads lib/real-data
-// instead — the manifest and the chain — so ENDPOINTS, AGENTS, RUNS and the
-// month totals below are referenced by nothing. What this file is still imported
-// for is the shared types, STATUS_TONE, the `usd`/`costOfSteps` helpers, and
-// WORKFLOWS, which the builder offers as starter templates that state plainly
-// they have never run. Nothing here is rendered as though it had happened.
+// This was the workspace's mock data layer. Every table that shows a number now
+// reads lib/real-data — the deployed agent's own manifest, and the chain — so
+// the sample ENDPOINTS, AGENTS, RUNS, SAMPLE_CALLERS and month totals had been
+// orphaned for a while: nothing outside this file imported them.
+//
+// Dead sample data is not harmless, which is why it is deleted rather than left
+// tidy. It carried USDC_ASSET_ID = "31566704" and X402_NETWORK =
+// "algorand-mainnet" — MAINNET values, sitting in an app that settles on TestNet
+// with asset 10458941. Unreferenced today, and precisely the constant someone
+// reaches for when wiring up the next view, at which point the workspace would
+// quote an asset it cannot settle in.
+//
+// What remains is what is actually used: the shared TYPES (Endpoint, Agent, Run
+// and friends are the shape lib/real-data returns), STEP_KIND_IDS, STATUS_TONE,
+// the `usd`/`compact`/`costOfSteps` helpers, and WORKFLOWS — starter templates
+// the builder offers, which state plainly that they have never run.
 
 export type Status = "live" | "paused" | "draft" | "error";
 export type AgentStatus = "idle" | "working" | "bidding" | "offline";
@@ -91,15 +100,6 @@ export type Run = {
   tx: string | null;
 };
 
-export const ENDPOINTS: Endpoint[] = [
-  { id: "ep_8f21", name: "Price Feed", slug: "algo-usd/spot", summary: "Signed ALGO/USD quote, refreshed each block.", status: "live", price: 0.001, calls24h: 12480, callsTotal: 384210, earned: 384.21, p50: 180, successRate: 0.998, listed: true, tags: ["oracle", "algorand"], updated: "2 min ago" },
-  { id: "ep_4b19", name: "Wallet Risk Score", slug: "wallet-risk/score", summary: "Risk band for an address from its onchain history.", status: "live", price: 0.01, calls24h: 4120, callsTotal: 91455, earned: 914.55, p50: 340, successRate: 0.991, listed: true, tags: ["risk", "compliance"], updated: "9 min ago" },
-  { id: "ep_2c07", name: "PDF → Rows", slug: "extract/pdf-table", summary: "Pulls line items out of a PDF into structured rows.", status: "live", price: 0.05, calls24h: 618, callsTotal: 14203, earned: 710.15, p50: 2900, successRate: 0.967, listed: true, tags: ["extraction"], updated: "1 h ago" },
-  { id: "ep_9d33", name: "NFT Trait Rarity", slug: "nft/rarity", summary: "Rarity ranking for a collection asset id.", status: "paused", price: 0.004, calls24h: 0, callsTotal: 22890, earned: 91.56, p50: 210, successRate: 0.994, listed: true, tags: ["nft"], updated: "3 d ago" },
-  { id: "ep_1a55", name: "Summarise", slug: "text/summarize", summary: "280-character summary of any text payload.", status: "draft", price: 0.01, calls24h: 0, callsTotal: 0, earned: 0, p50: 0, successRate: 0, listed: false, tags: ["llm"], updated: "just now" },
-  { id: "ep_7e02", name: "Sanctions Check", slug: "compliance/sanctions", summary: "Screens an address against published lists.", status: "error", price: 0.02, calls24h: 44, callsTotal: 8120, earned: 162.4, p50: 5400, successRate: 0.72, listed: false, tags: ["compliance"], updated: "12 min ago" },
-];
-
 /** Starter chains for the builder. Each describes a shape worth building; none
  *  of them has ever run, here or anywhere else. */
 export const WORKFLOWS: Workflow[] = [
@@ -113,24 +113,6 @@ export const WORKFLOWS: Workflow[] = [
     steps: [{ name: "cron daily", kind: "trigger" }, { name: "fetch receipts", kind: "call", price: 0.08 }, { name: "unmatched > 0", kind: "condition" }, { name: "Post message", kind: "mcp", tool: "slack.post_message" }] },
 ];
 
-export const AGENTS: Agent[] = [
-  { id: "ag_9c11", handle: "wallet-enricher", name: "Wallet Enricher", summary: "Labels addresses from onchain history and clustering heuristics.", status: "working", skills: ["enrichment", "algorand", "labelling"], jobsWon: 412, jobsBid: 604, successRate: 0.985, earned: 1284.6, avgBid: 1.85, responseMs: 340, joined: "Mar 2026", mine: true },
-  { id: "ag_be07", handle: "doc-parser", name: "Doc Parser", summary: "Turns scanned invoices and statements into structured rows.", status: "idle", skills: ["extraction", "ocr"], jobsWon: 1204, jobsBid: 1388, successRate: 0.991, earned: 4820.15, avgBid: 2.1, responseMs: 890, joined: "Jan 2026", mine: true },
-  { id: "ag_04f2", handle: "market-scout", name: "Market Scout", summary: "Monitors DEX pairs and reports arbitrage windows as they open.", status: "bidding", skills: ["defi", "monitoring"], jobsWon: 88, jobsBid: 240, successRate: 0.943, earned: 211.2, avgBid: 2.4, responseMs: 120, joined: "Jun 2026", mine: false },
-  { id: "ag_7d18", handle: "sanction-screen", name: "Sanction Screen", summary: "Screens counterparties against published sanctions lists.", status: "idle", skills: ["compliance", "risk"], jobsWon: 640, jobsBid: 702, successRate: 0.996, earned: 1920.0, avgBid: 3.0, responseMs: 460, joined: "Feb 2026", mine: false },
-  { id: "ag_2e90", handle: "chain-summarizer", name: "Chain Summariser", summary: "Writes plain-language digests of a wallet's recent activity.", status: "working", skills: ["llm", "reporting"], jobsWon: 315, jobsBid: 400, successRate: 0.974, earned: 630.5, avgBid: 2.0, responseMs: 1400, joined: "Apr 2026", mine: false },
-  { id: "ag_5c63", handle: "nft-appraiser", name: "NFT Appraiser", summary: "Prices collection assets from trait rarity and recent sales.", status: "offline", skills: ["nft", "pricing"], jobsWon: 96, jobsBid: 180, successRate: 0.912, earned: 172.8, avgBid: 1.8, responseMs: 720, joined: "May 2026", mine: false },
-];
-
-export const RUNS: Run[] = [
-  { id: "req_8f21c", target: "algo-usd/spot", kind: "endpoint", outcome: "ok", cost: 0.001, ms: 178, when: "just now", tx: "7A2F9C1B" },
-  { id: "run_8c21a", target: "Liquidation Guard", kind: "workflow", outcome: "retried", cost: 0.02, ms: 3240, when: "3 min ago", tx: "4B812D0A" },
-  { id: "req_4b19d", target: "wallet-risk/score", kind: "endpoint", outcome: "ok", cost: 0.01, ms: 336, when: "6 min ago", tx: "C11E70FF" },
-  { id: "job_2f88",  target: "Enrich 5,000 addresses", kind: "job", outcome: "ok", cost: 1.85, ms: 184000, when: "22 min ago", tx: "9E4A1B22" },
-  { id: "req_7e02f", target: "compliance/sanctions", kind: "endpoint", outcome: "failed", cost: 0, ms: 5400, when: "31 min ago", tx: null },
-  { id: "run_3f70b", target: "Treasury Sweep", kind: "workflow", outcome: "ok", cost: 0.03, ms: 2100, when: "41 min ago", tx: "1D77C904" },
-];
-
 /* ── x402 facts ──────────────────────────────────────────────────────────
    Nothing reads these any more: the test console, the Logs view and the
    generated receipts that quoted them have all been removed, and what the
@@ -138,34 +120,12 @@ export const RUNS: Run[] = [
    place with the rest of the mock module rather than half-emptied — see the
    note at the top of the file. */
 
-/** USDC on Algorand MainNet. */
-export const USDC_ASSET_ID = "31566704";
-const USDC_DECIMALS = 6;
-export const X402_NETWORK = "algorand-mainnet";
-export const API_HOST = "api.ripar.io";
-
-/** Base units for the wire — 0.001 USDC is "1000". */
-export const baseUnits = (usdcAmount: number) => Math.round(usdcAmount * 10 ** USDC_DECIMALS).toString();
-
-/** Checksum-valid Algorand addresses standing in for callers. They belong to no
- *  wallet — each is derived from a fixed label, so they are stable sample data. */
-export const SAMPLE_CALLERS = [
-  "Y354WNZCMZ7AZ2BBQN3YCWUXOU6WDAGLUMVZ2GJQ5BG4IK5MJIBRH3NXMU",
-  "2TKQXNZ6L34BCJJIY5F7NRXMWL4Z2Y3QMCY3OMG6EKOGLSI4R6IBVFWYGY",
-  "KAGXS4S3WEOG3S3PHMQG7TFRIX7OIXR4SYPCZWUP6J6STRDG35ZWDB7MA4",
-  "7NIX4IK6DLP2K7UFZHRQMDEDJSEKRSOQRJT6H3E5BRALLKPJLHBC3XMEDA",
-  "3BKQNHKMOVA6FXGDSNXNKEEA3WYHDLV275RECAW2CXGOJ3Q4PE66FJO3PM",
-];
-
 // The sample request/response bodies that used to live here fed the endpoint
 // test console. That console was removed: it invented a response for whatever
 // endpoint it was pointed at, and the Endpoints view already carries a curl
 // snippet that gets a real 402 out of the live agent.
 
 /* ── derived summaries ─────────────────────────────────────────────────── */
-
-export const settledThisMonth = 1284.6;
-export const callsThisMonth = ENDPOINTS.reduce((s, e) => s + e.callsTotal, 0);
 
 export const usd = (n: number, d = 2) =>
   n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
