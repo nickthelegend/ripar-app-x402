@@ -49,28 +49,6 @@ create policy "profiles: update own"
   using ((select auth.uid()) = id)
   with check ((select auth.uid()) = id);
 
--- Members of a shared org can read each other's profiles (for the roster).
--- SECURITY DEFINER so the check doesn't recurse through org_members RLS.
-create or replace function public.shares_org_with(other uuid)
-returns boolean
-language sql
-security definer
-set search_path = ''
-stable
-as $$
-  select exists (
-    select 1
-    from public.org_members mine
-    join public.org_members theirs on mine.org_id = theirs.org_id
-    where mine.user_id = (select auth.uid()) and theirs.user_id = other
-  );
-$$;
-
-create policy "profiles: co-members read"
-  on public.profiles for select
-  to authenticated
-  using (public.shares_org_with(id));
-
 /* --------------------------------- orgs ----------------------------------- */
 
 create table public.orgs (
@@ -94,6 +72,36 @@ create index org_members_user_idx on public.org_members (user_id);
 
 alter table public.orgs enable row level security;
 alter table public.org_members enable row level security;
+
+-- Members of a shared org can read each other's profiles (for the roster).
+-- SECURITY DEFINER so the check doesn't recurse through org_members RLS.
+--
+-- This has to sit AFTER org_members exists. `language sql` bodies are parsed
+-- and their dependencies resolved when the function is created, unlike plpgsql
+-- which defers to call time — so declaring it up with the profiles policies
+-- failed on a fresh database with `relation "public.org_members" does not
+-- exist`. The original project was built statement by statement against a live
+-- database, where the table already existed, so the file could never actually
+-- rebuild the schema it claims to define.
+create or replace function public.shares_org_with(other uuid)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.org_members mine
+    join public.org_members theirs on mine.org_id = theirs.org_id
+    where mine.user_id = (select auth.uid()) and theirs.user_id = other
+  );
+$$;
+
+create policy "profiles: co-members read"
+  on public.profiles for select
+  to authenticated
+  using (public.shares_org_with(id));
 
 -- Membership helpers. SECURITY DEFINER so policies on org_members don't
 -- recurse into themselves; search_path pinned per Supabase guidance.
@@ -448,3 +456,44 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+/* ------------------------------- grants ----------------------------------- */
+
+-- Row Level Security decides WHICH rows a caller sees. It does not grant the
+-- privilege to touch the table at all, and those are separate mechanisms: with
+-- RLS enabled and no GRANT, PostgREST answers every request with "permission
+-- denied for table profiles" no matter how permissive the policies are.
+--
+-- Hosted Supabase projects get these grants ambiently, from default privileges
+-- configured on the project long before any migration runs. This file never
+-- declared them, so it could not rebuild its own schema anywhere else — the API
+-- came up with no read or write access to a single table. Declaring them here
+-- makes the migration self-contained, which is the only way it can be trusted
+-- as the definition of the schema.
+--
+-- Granting broadly is deliberate and is not a loosening: every table below has
+-- RLS enabled, so the policies above remain the gate. anon is granted the same
+-- surface because an unauthenticated caller is still filtered by policies that
+-- are all `to authenticated` — as the RLS check in the verification proves, it
+-- reads zero rows.
+grant usage on schema public to anon, authenticated, service_role;
+
+grant select, insert, update, delete on all tables in schema public
+  to anon, authenticated, service_role;
+
+grant usage, select on all sequences in schema public
+  to anon, authenticated, service_role;
+
+grant execute on all functions in schema public
+  to anon, authenticated, service_role;
+
+-- Anything added later inherits the same treatment, so a new table cannot
+-- silently ship unreachable.
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to anon, authenticated, service_role;
+
+alter default privileges in schema public
+  grant usage, select on sequences to anon, authenticated, service_role;
+
+alter default privileges in schema public
+  grant execute on functions to anon, authenticated, service_role;
