@@ -70,7 +70,18 @@ export type UnsignedTxn = {
   summary: string;
 };
 
+/** Mirrors SimulationResult in lib/registry-compose — algod's verdict on a
+ *  transaction nobody has signed yet. Null means the node could not be asked,
+ *  which the panel must show differently from a rejection. */
+export type SimulationResult = {
+  ok: boolean;
+  failure: string | null;
+  budgetConsumed: number | null;
+  round: number | null;
+};
+
 export type ComposedCall = {
+  simulation: SimulationResult | null;
   signed: false;
   network: "testnet";
   appId: number;

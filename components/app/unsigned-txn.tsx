@@ -2,6 +2,7 @@
 
 import { ShieldCheck } from "lucide-react";
 import type { ComposedCall } from "@/lib/registry-client";
+import { cn } from "@/lib/utils";
 import { CodeBlock, CopyButton } from "./bits";
 
 /**
@@ -27,6 +28,47 @@ export function UnsignedCall({ call }: { call: ComposedCall }) {
           app {call.appId} · fee {(call.totalFee / 1e6).toFixed(4)} ALGO
         </span>
       </div>
+
+      {/* The chain's own verdict, asked before anyone is invited to sign.
+          Composing a well-formed transaction is not the same as composing one
+          that works: a stale agent_count, an off-by-one box name or a sender who
+          is not the owner all compose cleanly and fail on submit — after the
+          signature. A null simulation means the node could not be asked, which
+          is not the same as a rejection and does not claim to be. */}
+      {call.simulation && (
+        <div
+          className={cn(
+            "flex items-start gap-2 border-b px-4 py-2.5 text-[12.5px]",
+            call.simulation.ok
+              ? "border-black/[0.07] bg-emerald-50/60 text-emerald-800"
+              : "border-black/[0.07] bg-rose-50/70 text-rose-800",
+          )}
+        >
+          <span className="mt-[1px] font-semibold">
+            {call.simulation.ok ? "Simulated ✓" : "Would fail"}
+          </span>
+          <span className="leading-relaxed">
+            {call.simulation.ok ? (
+              <>
+                algod ran this against round {call.simulation.round?.toLocaleString()} and it
+                succeeded
+                {call.simulation.budgetConsumed != null
+                  ? `, using ${call.simulation.budgetConsumed} of its opcode budget`
+                  : ""}
+                . Signing is the only step left.
+              </>
+            ) : (
+              <>{call.simulation.failure} — signing this would spend the fee and change nothing.</>
+            )}
+          </span>
+        </div>
+      )}
+      {!call.simulation && (
+        <div className="border-b border-black/[0.07] bg-amber-50/60 px-4 py-2.5 text-[12.5px] text-amber-900">
+          <span className="font-semibold">Not simulated</span> — the node could not be reached, so
+          this has not been checked against the chain. That is not the same as it being wrong.
+        </div>
+      )}
 
       <div className="space-y-5 px-4 py-4">
         <div>

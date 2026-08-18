@@ -62,6 +62,27 @@ export type UnsignedTxn = {
   summary: string;
 };
 
+/**
+ * The chain's verdict on a transaction nobody has signed.
+ *
+ * Composing a well-formed transaction is not the same as composing one that
+ * works. The app used to hand over base64 and a list of what signing "would" do,
+ * with no evidence for any of it: a box name off by one, a stale agent_count, a
+ * sender who is not the owner — all compose cleanly and all fail on submit,
+ * after the user has signed.
+ *
+ * algod's simulate endpoint runs the program with `allow-empty-signatures`, so
+ * the answer is the real AVM's, not a guess about it.
+ */
+export type SimulationResult = {
+  ok: boolean;
+  /** The AVM's own message when it rejects, e.g. which assert failed. */
+  failure: string | null;
+  /** Opcode budget the call actually consumed, when it succeeded. */
+  budgetConsumed: number | null;
+  round: number | null;
+};
+
 export type ComposedCall = {
   signed: false;
   network: "testnet";
@@ -75,6 +96,12 @@ export type ComposedCall = {
   args: Record<string, unknown>;
   /** base64 of the 32-byte group id, when there is more than one transaction. */
   groupId: string | null;
+  /**
+   * What algod says would happen if this were submitted, asked BEFORE anyone is
+   * invited to sign it. Null only when the node could not be reached — an
+   * unreachable node and a rejected transaction are different facts.
+   */
+  simulation: SimulationResult | null;
   transactions: UnsignedTxn[];
   totalFee: number;
   validRounds: { first: number; last: number };
@@ -185,6 +212,8 @@ async function oneCall(
   const params = await suggestedParams();
   const txn = buildAppCall(params, spec);
   const boxes = (spec.boxes ?? []).map((b) => describeBox(b, spec.appId));
+  const encoded = Buffer.from(encodeUnsignedTransaction(txn)).toString("base64");
+  const simulation = await simulate([encoded]);
 
   return {
     signed: false,
@@ -196,12 +225,13 @@ async function oneCall(
     effects: meta.effects,
     args: meta.args,
     groupId: null,
+    simulation,
     transactions: [
       {
         signed: false,
         index: 0,
         kind: "appl",
-        unsignedTxnBase64: Buffer.from(encodeUnsignedTransaction(txn)).toString("base64"),
+        unsignedTxnBase64: encoded,
         txId: txn.txID(),
         fee: Number(txn.fee),
         boxes,
@@ -509,6 +539,10 @@ export async function composeFundJob(input: {
 
   assignGroupID([transfer, call]);
   const held = input.escrowBeforeMicro + input.amountMicro;
+  const encodedGroup = [transfer, call].map((t) =>
+    Buffer.from(encodeUnsignedTransaction(t)).toString("base64"),
+  );
+  const simulation = await simulate(encodedGroup);
 
   return {
     signed: false,
@@ -537,6 +571,7 @@ export async function composeFundJob(input: {
       fullyFundsBudget: held >= input.budgetMicro,
     },
     groupId: Buffer.from(call.group!).toString("base64"),
+    simulation,
     transactions: [
       {
         signed: false,
@@ -672,4 +707,78 @@ export async function composeRefundEscrow(input: {
       },
     }
   );
+}
+
+
+/* ── pre-flight ────────────────────────────────────────────────────────── */
+
+/**
+ * Algod's failure messages carry a full Go struct dump of the transaction —
+ * several kilobytes of zeroed fields around one clause that says what went
+ * wrong. This keeps the clause.
+ *
+ * Anything unrecognised is passed through truncated rather than replaced with
+ * something friendlier: a message we cannot parse is still the chain's answer,
+ * and inventing a nicer one would be guessing at the cause.
+ */
+export function readableFailure(raw: string): string {
+  const patterns = [
+    /overspend \(account \S+?,[\s\S]*?tried to spend ([^)]+)\)/,
+    /assert failed pc=\d+/,
+    /logic eval error: ([^.]+)/,
+    /box[^.,]*not found/i,
+    /invalid : ([^\n]+)/,
+  ];
+  for (const re of patterns) {
+    const m = raw.match(re);
+    if (!m) continue;
+    if (re.source.startsWith("overspend")) {
+      return `the sender cannot cover ${m[1]} — it holds no ALGO`;
+    }
+    return m[1] ?? m[0];
+  }
+  const firstClause = raw.split(/[:{]/)[0]?.trim();
+  return firstClause && firstClause.length < 160 ? firstClause : `${raw.slice(0, 150)}…`;
+}
+
+/**
+ * Ask algod what this transaction would do, without signing it.
+ *
+ * `allowEmptySignatures` is what makes this possible: the node runs the whole
+ * call — logic, box access, inner transactions, budget — against current state,
+ * with an unsigned transaction carrying an empty signature. It is the same
+ * evaluation submit performs, minus the commit. Without that flag the node
+ * rejects the group with "signedtxn has no sig" before it evaluates anything,
+ * which looks like a contract failure and is not one.
+ *
+ * Returns null when the node cannot be reached, and never a false `ok`. A caller
+ * has to be able to tell "the chain rejected this" from "we could not ask",
+ * because only the first is a reason not to sign.
+ */
+async function simulate(unsignedTxnsBase64: string[]): Promise<SimulationResult | null> {
+  try {
+    const algod = new algosdk.Algodv2("", TESTNET_ALGOD, "");
+    const txns = unsignedTxnsBase64.map(
+      (b64) => new algosdk.SignedTransaction({ txn: algosdk.decodeUnsignedTransaction(Buffer.from(b64, "base64")) }),
+    );
+    const request = new algosdk.modelsv2.SimulateRequest({
+      // The whole group goes in together. Simulating one member alone evaluates
+      // a transaction that cannot exist on its own — fund_job reads its amount
+      // off transaction 0 of the same group.
+      txnGroups: [new algosdk.modelsv2.SimulateRequestTransactionGroup({ txns })],
+      allowEmptySignatures: true,
+    });
+
+    const out = await algod.simulateTransactions(request).do();
+    const group = out.txnGroups?.[0];
+    const failure = group?.failureMessage ? readableFailure(group.failureMessage) : null;
+    return {
+      ok: !failure,
+      failure,
+      budgetConsumed: group?.appBudgetConsumed != null ? Number(group.appBudgetConsumed) : null,
+      round: out.lastRound != null ? Number(out.lastRound) : null,
+    };
+  } catch {
+    return null;
+  }
 }
