@@ -113,6 +113,18 @@ async function dispatch(body: Body, sender: string): Promise<ComposedCall> {
         `${sender} controls agent #${controls}, not #${agentId}. The contract reads the holder from the signer, so this would rotate the wrong identity or fail outright.`,
       );
     }
+    // Checked BEFORE the taken-address lookup. Rotating onto yourself trips that
+    // lookup too — your own address obviously already controls your own agent —
+    // and the caller then reads "already controls agent #1, one address holds at
+    // most one identity", which is true, unhelpful, and not why this was
+    // refused.
+    if (newAddress === sender) {
+      throw new ComposeError(
+        `${sender} is the address signing this, so rotating agent #${agentId || controls} onto it would change nothing. ` +
+          "Rotation moves an identity to a DIFFERENT address; give the one you want to hold it next.",
+      );
+    }
+
     const takenBy = await resolveByAddress(newAddress);
     if (takenBy > 0) {
       throw new ComposeError(
