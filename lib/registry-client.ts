@@ -82,6 +82,8 @@ export type SimulationResult = {
 
 export type ComposedCall = {
   simulation: SimulationResult | null;
+  /** base64 of the 32-byte replay lease. */
+  lease?: string;
   signed: false;
   network: "testnet";
   appId: number;

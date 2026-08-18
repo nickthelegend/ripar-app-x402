@@ -70,6 +70,16 @@ export function UnsignedCall({ call }: { call: ComposedCall }) {
         </div>
       )}
 
+      {call.lease && (
+        <div className="border-b border-black/[0.07] px-4 py-2.5 text-[12.5px] text-neutral-700">
+          <span className="font-semibold">Exactly once</span> — this action carries a lease derived
+          from what it is, so if it confirms, Algorand refuses a second copy from the same address
+          for the rest of its validity window. A double-click, a wallet retry, or a replay of these
+          bytes cannot execute it twice. Nothing enforces that but consensus: there is no nonce table
+          here.
+        </div>
+      )}
+
       <div className="space-y-5 px-4 py-4">
         <div>
           <h4 className="text-[12.5px] font-semibold text-neutral-900">What signing this would do</h4>

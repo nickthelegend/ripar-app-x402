@@ -14,6 +14,7 @@
  * exactly what a wallet expects, so the split costs the user one paste.
  */
 
+import { createHash } from "node:crypto";
 import algosdk from "algosdk";
 import {
   REGISTRY,
@@ -97,6 +98,12 @@ export type ComposedCall = {
   /** base64 of the 32-byte group id, when there is more than one transaction. */
   groupId: string | null;
   /**
+   * base64 of the 32-byte lease this action carries. Same action, same bytes —
+   * so consensus refuses the second confirmation while the first is still
+   * inside its validity window.
+   */
+  lease: string;
+  /**
    * What algod says would happen if this were submitted, asked BEFORE anyone is
    * invited to sign it. Null only when the node could not be reached — an
    * unreachable node and a rejected transaction are different facts.
@@ -167,6 +174,40 @@ type CallSpec = {
   innerTransactions?: number;
 };
 
+/**
+ * A deterministic lease for one logical action.
+ *
+ * Algorand enforces, in consensus, that two CONFIRMED transactions from the same
+ * sender cannot share a lease while the first is still inside its validity
+ * window. Deriving the lease from what the action *is* — the app, the method and
+ * its arguments — therefore makes that action exactly-once for that sender,
+ * without a nonce table, a database, or a contract change.
+ *
+ * This is the hole it closes. A user who double-clicks, a wallet that submits a
+ * retry it already sent, or a caller replaying a composed transaction it kept
+ * from earlier all produce the same bytes. Without a lease every one of those is
+ * a second real execution: two identical jobs posted, a result submitted twice,
+ * an escrow funded again.
+ *
+ * A failed or never-confirmed transaction holds no lease, so an honest retry
+ * after an error still works — only success is exclusive. The window is the
+ * transaction's own validity range, about 1000 rounds, after which the same
+ * action can legitimately be taken again.
+ *
+ * The sender is deliberately NOT in the digest: the lease is already scoped per
+ * sender by consensus, and including it would only make two different people
+ * unable to collide, which is not a property anyone needs.
+ */
+function leaseFor(spec: CallSpec): Uint8Array {
+  const parts = [
+    Buffer.from("ripar-action-v1"),
+    Buffer.from(String(spec.appId)),
+    Buffer.from(spec.signature),
+    ...spec.encodedArgs.map((a) => Buffer.from(a)),
+  ];
+  return new Uint8Array(createHash("sha256").update(Buffer.concat(parts)).digest());
+}
+
 function buildAppCall(params: algosdk.SuggestedParams, spec: CallSpec): algosdk.Transaction {
   // The selector is the first four bytes of sha512/256 over the exact signature
   // string, so it is derived rather than assembled — one character off and the
@@ -181,6 +222,8 @@ function buildAppCall(params: algosdk.SuggestedParams, spec: CallSpec): algosdk.
     foreignApps: spec.foreignApps,
     foreignAssets: spec.foreignAssets,
     accounts: spec.accounts,
+    // Exactly-once for this action, enforced by consensus rather than by us.
+    lease: leaseFor(spec),
     suggestedParams: inners
       ? { ...params, flatFee: true, fee: Number(params.minFee) * (1 + inners) }
       : params,
@@ -225,6 +268,7 @@ async function oneCall(
     effects: meta.effects,
     args: meta.args,
     groupId: null,
+    lease: Buffer.from(leaseFor(spec)).toString("base64"),
     simulation,
     transactions: [
       {
@@ -526,7 +570,11 @@ export async function composeFundJob(input: {
   });
 
   const boxes: BoxRef[] = [{ name: jobBoxName(input.jobId) }, { name: escrowBoxName(input.jobId) }];
-  const call = buildAppCall(params, {
+  // Built as a value first so the lease can be reported alongside the group.
+  // Funding the same job for the same amount twice is the mistake this stops:
+  // the second confirmation is refused by consensus rather than doubling the
+  // escrow.
+  const callSpec = {
     sender: input.sender,
     appId: REGISTRY.validation,
     // The `axfer` argument IS the transfer above: an ARC-4 transaction argument
@@ -535,7 +583,8 @@ export async function composeFundJob(input: {
     signature: "fund_job(axfer,uint64)uint64",
     encodedArgs: [uint64Bytes(input.jobId)],
     boxes,
-  });
+  };
+  const call = buildAppCall(params, callSpec);
 
   assignGroupID([transfer, call]);
   const held = input.escrowBeforeMicro + input.amountMicro;
@@ -572,6 +621,7 @@ export async function composeFundJob(input: {
     },
     groupId: Buffer.from(call.group!).toString("base64"),
     simulation,
+    lease: Buffer.from(leaseFor(callSpec)).toString("base64"),
     transactions: [
       {
         signed: false,
