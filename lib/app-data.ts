@@ -100,8 +100,10 @@ export type Run = {
   tx: string | null;
 };
 
-/** Starter chains for the builder. Each describes a shape worth building; none
- *  of them has ever run, here or anywhere else. */
+/** Starter chains for the builder. Each describes a shape worth building, and
+ *  arrives with no history — a run is recorded only once its calls have actually
+ *  gone out. The `price` on a step is the template's guess; what a run reports is
+ *  decoded from the 402 the endpoint returns. */
 export const WORKFLOWS: Workflow[] = [
   { id: "wf_8c21", name: "Liquidation Guard", summary: "Watches a Folks Finance position and tops up collateral before it breaches.", trigger: "cron · every 5m",
     steps: [{ name: "cron 5m", kind: "trigger" }, { name: "read health", kind: "call", price: 0.02 }, { name: "health < 1.4", kind: "condition" }, { name: "supply collateral", kind: "action" }] },

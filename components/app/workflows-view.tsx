@@ -5,7 +5,8 @@ import { ArrowLeft, Play, Plus } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { WORKFLOWS, costOfSteps, usd, type Step, type Workflow } from "@/lib/app-data";
-import { ago } from "@/lib/real-data";
+import { ago, useWorkspace } from "@/lib/real-data";
+import { runWorkflow, type RunResult } from "@/lib/workflow-run";
 import { clearActivity, recordRun, useActivity } from "@/lib/workflow-activity";
 import { clearGraph } from "@/lib/workflow-graph";
 import { EmptyState, PageHead, SearchInput, Sheet } from "./bits";
@@ -14,10 +15,6 @@ import { STEP_KINDS, WorkflowCanvas } from "./workflow-canvas";
 /** Steps that quote USDC. A metered MCP tool bills the way a paid call does. */
 const paidSteps = (steps: Step[]) =>
   steps.filter((s) => s.kind === "call" || (s.kind === "mcp" && !!s.price)).length;
-
-/** How long a run rests on each step. Slow enough to read, quick enough to sit
- *  through — and the unit the recorded duration is measured in. */
-const STEP_MS = 620;
 
 // The server's copy of each chain, captured before the session edits anything.
 // The builder's "reset to saved" goes back to this, not to the live item.
@@ -55,8 +52,9 @@ function Chain({ steps, running }: { steps: Step[]; running?: number }) {
  * What a workflow is, rather than what it has supposedly done. Every figure here
  * is read off the chain of steps in front of you — except the run count, which
  * comes from lib/workflow-activity and counts only the walks this browser has
- * actually recorded. A template that has never been run says "never", because it
- * never has: these ship as starting points and nothing has ever executed one.
+ * actually recorded. A template that has never been run says "never" — these
+ * ship as starting points, and a run appears only once its calls have gone out
+ * and come back.
  */
 function Facts({ w }: { w: Workflow }) {
   const { runs } = useActivity(w.id);
@@ -69,7 +67,7 @@ function Facts({ w }: { w: Workflow }) {
         ["Steps", String(w.steps.length)],
         ["Paid steps", String(paidSteps(w.steps))],
         ["Cost / run", `${usd(costOfSteps(w.steps), 3)} USDC`],
-        ["Run in this browser", last ? `${runs.length}× · last ${ago(last.at)}` : "never"],
+        ["Run from this browser", last ? `${runs.length}× · last ${ago(last.at)}` : "never"],
       ].map(([k, v]) => (
         <div key={k} className="flex items-baseline gap-1.5">
           <dt className="text-neutral-400">{k}</dt>
@@ -88,6 +86,7 @@ export function WorkflowsView() {
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [running, setRunning] = useState<{ id: string; step: number } | null>(null);
+  const workspace = useWorkspace();
   const { toast } = useToast();
 
   const rows = useMemo(() => {
@@ -97,36 +96,54 @@ export function WorkflowsView() {
       : items;
   }, [items, q]);
 
-  /** Walk the chain a step at a time so a run is legible, not a spinner. */
-  function run(w: Workflow) {
+  /**
+   * Walk the chain, issuing the requests it describes.
+   *
+   * Every `call` step hits a real endpoint from the deployed agent's manifest
+   * with no payment attached, so the endpoint answers 402 with a priced
+   * challenge, and the figure reported below is decoded from that challenge.
+   * The steps that cannot execute say so instead of being animated past.
+   */
+  async function run(w: Workflow) {
     if (running) return;
     if (w.steps.length === 0) return toast("Nothing to run — this workflow has no steps yet", "error");
-    let started = 0;
-    let step = 0;
-    setRunning({ id: w.id, step });
-    const tick = setInterval(() => {
-      // Clocked from inside the interval — the first tick is one step in, and
-      // reading the clock during render is neither pure nor allowed.
-      if (!started) started = Date.now() - STEP_MS;
-      step += 1;
-      if (step >= w.steps.length) {
-        clearInterval(tick);
-        setRunning(null);
-        // The walk that just happened is the only thing the builder's Runs tab
-        // ever shows — no run is written for a workflow nobody ran.
-        recordRun(w.id, {
-          outcome: "ok",
-          steps: w.steps.length,
-          cost: costOfSteps(w.steps),
-          ms: Date.now() - started,
-        });
-        // "Quotes", not "cost": walking the chain here signs nothing and moves
-        // no USDC. Saying it settled would be the lie this view exists without.
-        toast(`${w.name} walked · its steps quote ${usd(costOfSteps(w.steps), 3)} USDC`, "success");
-      } else {
-        setRunning({ id: w.id, step });
-      }
-    }, STEP_MS);
+
+    const endpoints = workspace.data?.endpoints ?? [];
+    if (!endpoints.some((e) => e.live) && w.steps.some((st) => st.kind === "call")) {
+      return toast("No live endpoint in the manifest to call — nothing would be requested", "error");
+    }
+
+    setRunning({ id: w.id, step: 0 });
+    let result: RunResult;
+    try {
+      result = await runWorkflow(w, endpoints, {
+        onStep: (i) => setRunning({ id: w.id, step: i }),
+      });
+    } finally {
+      setRunning(null);
+    }
+
+    recordRun(w.id, {
+      // The outcome is the servers' answer, not the fact that the loop finished.
+      outcome: result.ok ? "ok" : "failed",
+      steps: result.executed,
+      cost: result.quotedUsdc,
+      ms: result.ms,
+    });
+
+    const skipped = w.steps.length - result.executed;
+    const tail = skipped > 0 ? ` · ${skipped} step${skipped === 1 ? "" : "s"} had nothing to call` : "";
+    if (result.ok) {
+      toast(
+        `${w.name} ran · ${result.executed} paid call${result.executed === 1 ? "" : "s"} quoted ` +
+          `${usd(result.quotedUsdc, 3)} USDC in ${result.ms}ms${tail}`,
+        "success",
+      );
+    } else {
+      // Name the first thing that actually went wrong, rather than "failed".
+      const bad = result.results.find((r) => !r.ok);
+      toast(bad ? `${w.name}: ${bad.detail}` : `${w.name} ran but nothing was executable${tail}`, "error");
+    }
   }
 
   // The canvas hands the edited chain back so the list, the run and the cost
@@ -173,7 +190,7 @@ export function WorkflowsView() {
     <>
       <PageHead
         title="Workflows"
-        subtitle="A workflow chains triggers, paid calls and onchain actions. This is a builder: a chain lives in this browser and runs when you press Run, which walks it step by step. Nothing here is scheduled — there is no trigger service behind it yet, so no workflow fires on its own and no USDC moves."
+        subtitle="A workflow chains triggers, paid calls and onchain actions. Press Run and every paid call in the chain is issued for real, against the deployed agent's published manifest — the price each step reports is decoded from the 402 that endpoint just returned, not from the template. Nothing is scheduled: there is no trigger service behind it yet, so no workflow fires on its own. And no USDC moves — the calls carry no payment, which is exactly why the answer is 402."
         actions={
           <button
             type="button"
