@@ -47,6 +47,9 @@ export const BOX_PREFIX = {
   job: "jb_",
   /** `es_` + uint64 job id. The VALUE is a bare uint64 of base units. */
   escrow: "es_",
+  /** `bd_` + uint64 job id + uint64 agent id — 19 bytes. Two ids, not one, so a
+   *  job carries one box per bidder and they do not overwrite each other. */
+  bid: "bd_",
 } as const;
 
 /**
@@ -160,6 +163,11 @@ export const agentBoxName = (id: number | bigint) => withPrefix(BOX_PREFIX.agent
 export const scoreBoxName = (id: number | bigint) => withPrefix(BOX_PREFIX.score, uint64Bytes(id));
 export const jobBoxName = (id: number | bigint) => withPrefix(BOX_PREFIX.job, uint64Bytes(id));
 export const escrowBoxName = (id: number | bigint) => withPrefix(BOX_PREFIX.escrow, uint64Bytes(id));
+
+/** Verified against the chain: bd_ + job 3 + agent 2 is
+ *  62645f00000000000000030000000000000002 — 19 bytes, both ids big-endian. */
+export const bidBoxName = (jobId: number | bigint, agentId: number | bigint) =>
+  withPrefix(BOX_PREFIX.bid, new Uint8Array([...uint64Bytes(jobId), ...uint64Bytes(agentId)]));
 
 /** `dm_` + the domain's raw UTF-8. NO ARC-4 length prefix — one would address
  *  a box that does not exist. */

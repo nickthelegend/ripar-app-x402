@@ -22,6 +22,7 @@ import {
   addressBoxName,
   agentBoxName,
   domainBoxName,
+  bidBoxName,
   escrowBoxName,
   formatUnits,
   jobBoxName,
@@ -438,13 +439,9 @@ export async function composeSubmitResult(input: {
   resultHashHex: string;
   identityApp: number;
 }): Promise<ComposedCall> {
-  const hex = input.resultHashHex.trim().replace(/^0x/, "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(hex)) {
-    throw new ComposeError(
-      `result_hash must be a 32-byte sha256 digest as 64 hex characters; got ${hex.length} character${hex.length === 1 ? "" : "s"}.`
-    );
-  }
-  const bytes = new Uint8Array(Buffer.from(hex, "hex"));
+  const bytes = hash32(input.resultHashHex, "result_hash");
+  // Normalised form, for the human-facing strings below.
+  const hex = Buffer.from(bytes).toString("hex");
 
   return oneCall(
     {
@@ -831,4 +828,209 @@ async function simulate(unsignedTxnsBase64: string[]): Promise<SimulationResult 
   } catch {
     return null;
   }
+}
+
+/**
+ * A 32-byte digest from hex, or a refusal that says what was wrong.
+ *
+ * The chain stores hashes; the callers hand them over as text. Anything short of
+ * exactly 64 hex characters is rejected with its actual length, because "invalid
+ * hash" tells the caller nothing about which end they got wrong.
+ */
+function hash32(hex: string, field: string): Uint8Array {
+  const clean = hex.trim().replace(/^0x/, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(clean)) {
+    throw new ComposeError(
+      `${field} must be a 32-byte sha256 digest as 64 hex characters; got ${clean.length} character${clean.length === 1 ? "" : "s"}.`,
+    );
+  }
+  return new Uint8Array(Buffer.from(clean, "hex"));
+}
+
+/* ── identity: recover a lost or rotating key ──────────────────────────── */
+
+/**
+ * Compose `rotate_address(uint64,address)bool`.
+ *
+ * This project is its own argument for why this exists. Two earlier registry
+ * deployments — 768572968 and 768633998 — are still on chain, still readable,
+ * and permanently unwritable, because their deployer mnemonics were kept in
+ * /tmp and pruned. Rotation is the difference between an identity that survives
+ * a key change and one that dies with it.
+ *
+ * It has to be signed by the CURRENT controlling address, which is the whole
+ * shape of the guarantee: rotation is a power the holder has over their own
+ * identity, not a recovery anyone else can perform for them. That also means it
+ * only helps if you rotate BEFORE you lose the key — after is too late, and the
+ * two dead registries are what that looks like.
+ *
+ * Three boxes move: the agent record itself, and both reverse indexes, since
+ * `ad_<old>` must stop resolving and `ad_<new>` must start.
+ */
+export async function composeRotateAddress(input: {
+  sender: string;
+  agentId: number;
+  newAddress: string;
+}): Promise<ComposedCall> {
+  if (!Number.isInteger(input.agentId) || input.agentId < 1) {
+    throw new ComposeError("An agent id of 1 or more is required; the contract rejects 0.");
+  }
+  if (!algosdk.isValidAddress(input.newAddress)) {
+    throw new ComposeError(
+      "The new controlling address is not a well-formed Algorand address. Fifty-eight base32 characters, the last four a SHA-512/256 checksum.",
+    );
+  }
+  if (input.newAddress === input.sender) {
+    throw new ComposeError(
+      "The new address is the one already signing, so this would rotate the identity onto itself and change nothing.",
+    );
+  }
+  return oneCall(
+    {
+      sender: input.sender,
+      appId: REGISTRY.identity,
+      signature: "rotate_address(uint64,address)bool",
+      encodedArgs: [uint64Bytes(input.agentId), algosdk.decodeAddress(input.newAddress).publicKey],
+      boxes: [
+        { name: agentBoxName(input.agentId) },
+        { name: addressBoxName(input.sender) },
+        { name: addressBoxName(input.newAddress) },
+      ],
+    },
+    {
+      summary:
+        `Move agent #${input.agentId} to a new controlling address on IdentityRegistry ${REGISTRY.identity}. ` +
+        `After this, ${input.newAddress} is the agent and ${input.sender} is not.`,
+      effects: [
+        `Rewrites ag_${input.agentId} so the agent record names ${input.newAddress}.`,
+        `Deletes ad_<${input.sender.slice(0, 8)}…> and writes ad_<${input.newAddress.slice(0, 8)}…>, so address lookups follow the identity rather than stranding it.`,
+        "The domain and the agent id do not change: reputation, jobs and history stay attached to the same agent.",
+        "Must be signed by the address that controls the agent today. Nobody can rotate somebody else's identity, and nobody can rotate yours back.",
+        "Rotate before you need to. An address you no longer control cannot sign this, which is exactly how two earlier deployments of these registries became permanently unwritable.",
+      ],
+      args: { agentId: input.agentId, from: input.sender, to: input.newAddress },
+      nextSteps: [
+        "Sign with the CURRENT address — the new one has no authority until this confirms.",
+        "Then verify: resolve the new address on the explorer and check it returns this agent id.",
+      ],
+    },
+  );
+}
+
+/* ── validation: the bidding loop ──────────────────────────────────────── */
+
+/**
+ * Compose `place_bid(uint64,uint64,uint64,byte[])bool`.
+ *
+ * The pitch is "post a job and let agents bid for it", and until now the app
+ * could post and assign but never bid — the loop was closed on chain and open in
+ * the product.
+ */
+export async function composePlaceBid(input: {
+  sender: string;
+  jobId: number;
+  agentId: number;
+  amountMicro: number;
+  /** Hex sha256 of the offchain proposal. Parsed here, as submit_result does. */
+  noteHashHex: string;
+}): Promise<ComposedCall> {
+  if (!Number.isInteger(input.agentId) || input.agentId < 1) {
+    throw new ComposeError("An agent id of 1 or more is required; the contract rejects 0.");
+  }
+  if (!Number.isInteger(input.amountMicro) || input.amountMicro < 1) {
+    throw new ComposeError("A bid must be at least one base unit. A zero bid is not an offer.");
+  }
+  return oneCall(
+    {
+      sender: input.sender,
+      appId: REGISTRY.validation,
+      signature: "place_bid(uint64,uint64,uint64,byte[])bool",
+      encodedArgs: [
+        uint64Bytes(input.jobId),
+        uint64Bytes(input.agentId),
+        uint64Bytes(input.amountMicro),
+        ABIType.from("byte[]").encode(hash32(input.noteHashHex, "note hash")),
+      ],
+      boxes: [
+        { name: jobBoxName(input.jobId) },
+        { name: bidBoxName(input.jobId, input.agentId) },
+        // The inner call reads the agent's own box, and a box touched by an
+        // INNER transaction still has to be declared on the OUTER one — box
+        // references are a property of the whole group, not of the call that
+        // happens to read them.
+        { appId: REGISTRY.identity, name: agentBoxName(input.agentId) },
+      ],
+      // The contract resolves the bidding agent through the IdentityRegistry, so
+      // that app has to be named on the call. Without it simulate reports
+      // "unavailable App 769444119" — which is the AVM saying the app was never
+      // made available to this transaction, not that it is down.
+      foreignApps: [REGISTRY.identity],
+      // Resolving the agent is an inner call, and an inner transaction is paid
+      // for by the outer one. Left at the default the group is short and the AVM
+      // rejects it with "group fee 0" — a fee problem wearing the costume of a
+      // logic error.
+      innerTransactions: 1,
+    },
+    {
+      summary:
+        `Offer to do job #${input.jobId} as agent #${input.agentId} for ${formatUnits(input.amountMicro)}, ` +
+        `on ValidationRegistry ${REGISTRY.validation}.`,
+      effects: [
+        `Writes bd_${input.jobId}_${input.agentId} with the amount offered. One bid per agent per job; bidding again replaces it.`,
+        "Commits no money. A bid is an offer, and only accept_bid moves the job.",
+        "Only while the job is open — once it is assigned the contract closes bidding.",
+        "The pitch is worth stating plainly: the client does not have to take the lowest bid, and nothing here forces them to.",
+      ],
+      args: { jobId: input.jobId, agentId: input.agentId, amountMicro: input.amountMicro },
+    },
+  );
+}
+
+/**
+ * Compose `accept_bid(uint64,uint64)bool`.
+ *
+ * This does two things in one call and the second is the one that matters: it
+ * assigns the job AND overwrites the budget with the bid amount, so the agent is
+ * owed what it offered rather than what was first posted. A client who reads
+ * only "assigns the job" would be surprised by their escrow.
+ */
+export async function composeAcceptBid(input: {
+  sender: string;
+  jobId: number;
+  agentId: number;
+  bidAmountMicro?: number;
+  postedBudgetMicro?: number;
+}): Promise<ComposedCall> {
+  if (!Number.isInteger(input.agentId) || input.agentId < 1) {
+    throw new ComposeError("An agent id of 1 or more is required; the contract rejects 0.");
+  }
+  const rewrite =
+    input.bidAmountMicro != null && input.postedBudgetMicro != null
+      ? ` The budget becomes ${formatUnits(input.bidAmountMicro)}, replacing the ${formatUnits(input.postedBudgetMicro)} first posted.`
+      : "";
+  return oneCall(
+    {
+      sender: input.sender,
+      appId: REGISTRY.validation,
+      signature: "accept_bid(uint64,uint64)bool",
+      encodedArgs: [uint64Bytes(input.jobId), uint64Bytes(input.agentId)],
+      boxes: [
+        { name: jobBoxName(input.jobId) },
+        { name: bidBoxName(input.jobId, input.agentId) },
+        { appId: REGISTRY.identity, name: agentBoxName(input.agentId) },
+      ],
+      foreignApps: [REGISTRY.identity],
+      innerTransactions: 1,
+    },
+    {
+      summary: `Take agent #${input.agentId}'s bid on job #${input.jobId}.${rewrite}`,
+      effects: [
+        `Assigns job #${input.jobId} to agent #${input.agentId}, so only that agent may submit a result.`,
+        "REWRITES THE BUDGET to the bid amount. This is the part that surprises people: the number you owe becomes the number they offered, not the number you posted.",
+        "Closes bidding on the job. Other bids stay readable but can no longer be taken.",
+        "Client only, and only while the job is open.",
+      ],
+      args: { jobId: input.jobId, agentId: input.agentId },
+    },
+  );
 }

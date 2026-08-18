@@ -12,11 +12,14 @@ import {
 import { disputeWindowClosesAt, legalActions, type ActionId } from "@/lib/registry-actions";
 import {
   ComposeError,
+  composeAcceptBid,
   composeAssignJob,
   composeCancelJob,
   composeFundJob,
   composeNewAgent,
+  composePlaceBid,
   composeRefundEscrow,
+  composeRotateAddress,
   composeReleaseEscrow,
   composeSetValidator,
   composeSubmitResult,
@@ -42,7 +45,7 @@ import {
 export const dynamic = "force-dynamic";
 
 type Body = {
-  action: ActionId | "new_agent";
+  action: ActionId | "new_agent" | "rotate_address";
   sender?: string;
   domain?: string;
   jobId?: number;
@@ -50,6 +53,10 @@ type Body = {
   resultHash?: string;
   passed?: boolean;
   amountMicro?: number;
+  newAddress?: string;
+  noteHash?: string;
+  bidAmountMicro?: number;
+  postedBudgetMicro?: number;
 };
 
 const bad = (message: string, status = 400) =>
@@ -84,6 +91,37 @@ export async function POST(request: Request) {
 }
 
 async function dispatch(body: Body, sender: string): Promise<ComposedCall> {
+  // Identity actions carry no job, and the job-id guard below would otherwise
+  // reject them with "A job id of 1 or more is required" — an error about a
+  // field the caller was right not to send.
+  if (body.action === "rotate_address") {
+    const agentId = Number(body.agentId);
+    const newAddress = String(body.newAddress ?? "").trim();
+
+    // Checked here so the caller reads a sentence instead of a bare assert. The
+    // contract takes the CURRENT holder from Txn.sender, so signing from an
+    // address that does not control the agent fails on chain with nothing that
+    // says why.
+    const controls = await resolveByAddress(sender);
+    if (controls === 0) {
+      throw new ComposeError(
+        `${sender} controls no agent, so it cannot rotate one. Only the address that holds an identity today can move it.`,
+      );
+    }
+    if (agentId && controls !== agentId) {
+      throw new ComposeError(
+        `${sender} controls agent #${controls}, not #${agentId}. The contract reads the holder from the signer, so this would rotate the wrong identity or fail outright.`,
+      );
+    }
+    const takenBy = await resolveByAddress(newAddress);
+    if (takenBy > 0) {
+      throw new ComposeError(
+        `${newAddress} already controls agent #${takenBy}. One address holds at most one identity, so the contract would reject this.`,
+      );
+    }
+    return composeRotateAddress({ sender, agentId: agentId || controls, newAddress });
+  }
+
   if (body.action === "new_agent") {
     const domain = (body.domain ?? "").trim();
     if (!domain) throw new ComposeError("A domain is required.");
@@ -160,6 +198,25 @@ async function dispatch(body: Body, sender: string): Promise<ComposedCall> {
   }
 
   switch (body.action) {
+    case "place_bid":
+      return composePlaceBid({
+        sender,
+        jobId,
+        agentId: Number(body.agentId),
+        amountMicro: Number(body.amountMicro),
+        // The spec behind a bid stays offchain; the chain carries its hash.
+        noteHashHex: String(body.noteHash ?? "0x" + "00".repeat(32)),
+      });
+
+    case "accept_bid":
+      return composeAcceptBid({
+        sender,
+        jobId,
+        agentId: Number(body.agentId),
+        bidAmountMicro: body.bidAmountMicro != null ? Number(body.bidAmountMicro) : undefined,
+        postedBudgetMicro: body.postedBudgetMicro != null ? Number(body.postedBudgetMicro) : undefined,
+      });
+
     case "assign_job":
       return composeAssignJob({ sender, jobId, serverAgentId: Number(body.agentId) });
 

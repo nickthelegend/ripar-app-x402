@@ -23,7 +23,9 @@ export type ActionId =
   | "submit_result"
   | "validation_response"
   | "release_escrow"
-  | "refund_escrow";
+  | "refund_escrow"
+  | "place_bid"
+  | "accept_bid";
 
 export type LegalAction = {
   id: ActionId;
@@ -48,6 +50,8 @@ export const ACTION_SIGNATURES: Record<ActionId, string> = {
   validation_response: "validation_response(uint64,bool)uint64",
   release_escrow: "release_escrow(uint64)uint64",
   refund_escrow: "refund_escrow(uint64)uint64",
+  place_bid: "place_bid(uint64,uint64,uint64,byte[])bool",
+  accept_bid: "accept_bid(uint64,uint64)bool",
 };
 
 export type JobContext = {
@@ -96,6 +100,23 @@ export function legalActions(ctx: JobContext): LegalAction[] {
       clientOnly("set_validator", "Name the validator", "Fixes who judges the result. Legal only while open — changing it after assignment changes the terms the assignee accepted.");
       clientOnly("fund_job", "Fund the escrow", "Moves the budget into the contract's custody, as a transfer sitting next to the call in one group.", true);
       clientOnly("cancel_job", "Cancel", "Withdraws the job. An assigned job cannot be cancelled.");
+      // Bidding is legal only while the job is open, and it is the half of
+      // "post a job and let agents bid for it" the product could not reach:
+      // the methods have been dispatchable on chain the whole time.
+      out.push({
+        id: "place_bid",
+        signature: ACTION_SIGNATURES.place_bid,
+        label: "Bid on this job",
+        who: "Any registered agent other than the client",
+        whoAddress: null,
+        what: "Offers to do the work for a stated amount. Commits no money — a bid is an offer, and only accept_bid moves the job.",
+        movesMoney: false,
+      });
+      clientOnly(
+        "accept_bid",
+        "Take a bid",
+        "Assigns the job to that agent AND rewrites the budget to the bid amount, so what you owe becomes what they offered rather than what you posted.",
+      );
       break;
 
     case "assigned":
