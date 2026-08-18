@@ -33,9 +33,9 @@ export const TESTNET_INDEXER = "https://testnet-idx.algonode.cloud";
  * looks exactly like a real one.
  */
 export const REGISTRY = {
-  identity: 768_633_998,
-  reputation: 768_633_999,
-  validation: 768_634_000,
+  identity: 769_444_119,
+  reputation: 769_444_120,
+  validation: 769_444_121,
 } as const;
 
 /** Box name prefixes, exactly as the contracts write them. */
