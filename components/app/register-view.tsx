@@ -15,7 +15,11 @@ import {
 import { PageHead, Sheet } from "./bits";
 import { ComposeRefused, UnsignedCall } from "./unsigned-txn";
 
-const IDENTITY_APP = 768_633_998;
+// The app id is read from the API response (`data.identityApp`) rather than
+// declared here. This was `768_633_998` — a dead registry from two generations
+// ago — while compose() targeted 769444119, so the page told the user they were
+// registering into one app and built a transaction against another, and linked
+// them to the dead one. Taking it from the response makes drift impossible.
 const peraApp = (id: number) => `https://testnet.explorer.perawallet.app/application/${id}/`;
 const peraAddress = (a: string) => `https://testnet.explorer.perawallet.app/address/${a}/`;
 
@@ -195,15 +199,22 @@ export function RegisterView() {
                     function at all.
                   </p>
                   <p className="mt-3 text-[13px] leading-relaxed text-neutral-500">
-                    Signing costs one transaction fee. No asset moves and app{" "}
-                    <a
-                      href={peraApp(IDENTITY_APP)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-accent"
-                    >
-                      {IDENTITY_APP} <ArrowUpRight size={11} />
-                    </a>{" "}
+                    Signing costs one transaction fee. No asset moves and{" "}
+                    {check.data ? (
+                      <>
+                        app{" "}
+                        <a
+                          href={peraApp(check.data.identityApp)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-accent"
+                        >
+                          {check.data.identityApp} <ArrowUpRight size={11} />
+                        </a>
+                      </>
+                    ) : (
+                      "the Identity Registry"
+                    )}{" "}
                     takes custody of nothing.
                   </p>
                 </div>

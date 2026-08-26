@@ -47,13 +47,47 @@ export function AuthPanel() {
       return;
     }
     setLoading("email");
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo },
-    });
-    setLoading(null);
-    if (error) setError(error.message);
-    else setSent(true);
+
+    // Reach the auth host before asking the client library to. When the project
+    // behind NEXT_PUBLIC_SUPABASE_URL is gone, `signInWithOtp` throws a bare
+    // `TypeError: Failed to fetch` — which supabase-js also logs to the console,
+    // and which we then rendered verbatim. "Failed to fetch" tells a user
+    // nothing they can act on: it reads identically whether their wifi dropped,
+    // the site is broken, or the backend no longer exists.
+    const reachable = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/health`, {
+      method: "GET",
+      mode: "no-cors",
+      cache: "no-store",
+    })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!reachable) {
+      setLoading(null);
+      setError(
+        "Cannot reach the sign-in service. This is not your connection — the " +
+          "authentication backend for this deployment is not responding. " +
+          "Everything else on Ripar reads the chain directly and still works."
+      );
+      return;
+    }
+
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: redirectTo },
+      });
+      if (error) setError(error.message);
+      else setSent(true);
+    } catch {
+      // A throw here is transport, not a rejected credential — the library only
+      // returns `{ error }` for answers it actually received.
+      setError(
+        "The sign-in service did not respond. Nothing was sent, and no account was changed."
+      );
+    } finally {
+      setLoading(null);
+    }
   };
 
   return (

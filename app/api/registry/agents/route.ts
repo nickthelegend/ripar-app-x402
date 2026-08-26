@@ -9,7 +9,7 @@ import {
 } from "@/lib/registry-chain";
 
 /**
- * The Identity Registry's own directory: every `ag_` box on app 768633998,
+ * The Identity Registry's own directory: every `ag_` box on app 769444119,
  * with whatever the Reputation Registry has recorded against each id.
  *
  * This is NOT the Agents view's list. That one is derived from settlement

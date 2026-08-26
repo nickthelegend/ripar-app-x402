@@ -9,6 +9,7 @@ import {
   Sparkles,
   Wand2,
 } from "lucide-react";
+import { Mark } from "@/components/ui/mark";
 
 const sidebar = [
   { label: "Home", Icon: Home, active: true },
@@ -65,9 +66,7 @@ export function DashboardPreview() {
             {/* sidebar */}
             <div className="w-44 shrink-0 border-r border-white/10 bg-neutral-900/60 p-3">
               <div className="mb-4 flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-[#ff7757] to-[#ff6b2b]">
-                  <span className="h-2 w-2 rotate-45 rounded-[2px] bg-white" />
-                </span>
+                <Mark size={22} />
                 <div className="leading-tight">
                   <div className="text-[11px] font-semibold">Ripar</div>
                   <div className="text-[8px] text-white/40">Algorand TestNet</div>

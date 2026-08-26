@@ -19,7 +19,7 @@ const usd = (n: number, d = 2) =>
  * table — you get in by being paid.
  *
  * There IS now a registry, and it answers a different question. The Directory
- * view reads `ag_` boxes out of IdentityRegistry 768633998: a self-attested id,
+ * view reads `ag_` boxes out of IdentityRegistry 769444119: a self-attested id,
  * domain and controlling address. Being there proves someone registered; being
  * here proves someone paid. Neither list contains the other, and the note below
  * the table says so on screen rather than leaving it to be discovered.

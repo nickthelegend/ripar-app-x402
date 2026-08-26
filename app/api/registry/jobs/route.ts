@@ -13,7 +13,7 @@ import { disputeWindowClosesAt, legalActions, nothingLegalReason } from "@/lib/r
  * The onchain job board, with the two money facts kept apart.
  *
  * A BUDGET is a number the client wrote into the job struct. An ESCROW is what
- * app 768634000 is actually holding, in its own `es_` box. Posting a job moves
+ * app 769444121 is actually holding, in its own `es_` box. Posting a job moves
  * nothing, so a job showing a budget of 1.0 and an escrow of 0 is unfunded —
  * and that is the single most useful thing to know before doing the work.
  * Collapsing the two would let this board report an intention as a guarantee.

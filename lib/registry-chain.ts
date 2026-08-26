@@ -32,10 +32,19 @@ export const TESTNET_INDEXER = "https://testnet-idx.algonode.cloud";
  * drift, because a page quoting a stale app id shows an empty registry that
  * looks exactly like a real one.
  */
+// Env-overridable, with the live TestNet values as defaults. These were bare
+// literals, which made a MainNet cutover a code change in three repos rather
+// than a configuration change — and app ids are network-scoped, so 769444119
+// on MainNet is a stranger's contract, not this one.
+const appId = (v: string | undefined, fallback: number) => {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+
 export const REGISTRY = {
-  identity: 769_444_119,
-  reputation: 769_444_120,
-  validation: 769_444_121,
+  identity: appId(process.env.NEXT_PUBLIC_IDENTITY_APP, 769_444_119),
+  reputation: appId(process.env.NEXT_PUBLIC_REPUTATION_APP, 769_444_120),
+  validation: appId(process.env.NEXT_PUBLIC_VALIDATION_APP, 769_444_121),
 } as const;
 
 /** Box name prefixes, exactly as the contracts write them. */

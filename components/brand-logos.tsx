@@ -1,4 +1,5 @@
 import type { SVGProps } from "react";
+import { Mark } from "@/components/ui/mark";
 
 export function GoogleLogo(props: SVGProps<SVGSVGElement>) {
   return (
@@ -43,12 +44,13 @@ export function GitHubLogo(props: SVGProps<SVGSVGElement>) {
 }
 
 export function RiparWordmark() {
+  // Uses the canonical fan from components/ui/mark.tsx — the same mark the app
+  // shell and the favicon draw. This previously rendered a rotated rounded
+  // square with a dot in it, a placeholder that shared nothing with the brand
+  // but the colour, and it was the only surface still doing so.
   return (
     <span className="flex items-center gap-2">
-      <span className="relative flex h-6 w-6 items-center justify-center">
-        <span className="absolute inset-0 rotate-45 rounded-[6px] bg-gradient-to-br from-[#ff7757] to-[#ff6b2b]" />
-        <span className="relative h-1.5 w-1.5 rounded-full bg-white" />
-      </span>
+      <Mark size={28} />
       <span className="text-xl font-semibold tracking-tight text-neutral-900">Ripar</span>
     </span>
   );

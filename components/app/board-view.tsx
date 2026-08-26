@@ -38,7 +38,7 @@ const shortHash = (h: string) => `${h.slice(0, 10)}…${h.slice(-6)}`;
  * The onchain job board, with escrow and the next legal move on every row.
  *
  * A BUDGET is a number the client wrote into the job struct; posting a job
- * moves nothing. An ESCROW is what app 768634000 actually holds in an `es_`
+ * moves nothing. An ESCROW is what app 769444121 actually holds in an `es_`
  * box. A row showing a budget and no escrow is unfunded, and that distinction
  * is not cosmetic — it is the difference between an intention and a guarantee.
  *
