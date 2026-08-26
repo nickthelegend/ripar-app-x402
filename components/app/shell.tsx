@@ -108,9 +108,21 @@ export function AppShell() {
 
       <Modal open={withdraw} onClose={() => setWithdraw(false)} title="Withdraw to wallet" description="Settlement already lands in your own Algorand address — Ripar never holds the balance.">
         <p className="text-[13.5px] leading-relaxed text-neutral-600">
-          There is nothing to withdraw from Ripar. Each paid call settles directly from the
-          caller to <span className="font-mono text-[12.5px]">{shortAddress(payout)}</span>, so the funds are
-          already yours. This button exists to say so.
+            {/* With no payout set this interpolated an empty span, so the sentence
+                read "settles directly from the caller to , so the funds are already
+                yours". Signed out there is no address to name, and the point stands
+                without one. */}
+            There is nothing to withdraw from Ripar. Each paid call settles directly from the
+            caller to{" "}
+            {payout ? (
+              <>
+                <span className="font-mono text-[12.5px]">{shortAddress(payout)}</span>, so the
+                funds are already yours.
+              </>
+            ) : (
+              <>the payout address on the endpoint, never through Ripar.</>
+            )}{" "}
+            This button exists to say so.
         </p>
         <div className="mt-5 flex justify-end">
           <button type="button" onClick={() => setWithdraw(false)} className="rounded-lg bg-neutral-900 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-neutral-800">
