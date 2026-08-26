@@ -18,89 +18,17 @@ export type Turn = {
   stopped?: boolean;
 };
 
-/**
- * Replies are scripted and run entirely in the browser — there is no model
- * behind this yet. Each script is the shape of an answer the real thing has to
- * give: the call it would make, what came back, then the plain-language reply.
- */
-type Script = {
-  match: RegExp;
-  tool?: { call: string; result: string };
-  reply: string;
-  facts?: Fact[];
-};
-
-const SCRIPTS: Script[] = [
-  {
-    match: /\b(price|pricing|charge|cost|usdc|402|list|publish|bazaar)\b/i,
-    tool: {
-      call: `ripar.endpoint.update({ slug: "text/summarize", price: 0.01, listed: true })`,
-      result: "ok · draft → live, quote armed",
-    },
-    reply:
-      "Done. Summarise now answers an unpaid request with 402 and a 0.010 USDC quote, and it is listed on the Bazaar so agents can find it without you introducing them. A caller that attaches X-PAYMENT and retries gets the run, and the USDC settles straight to your address — Ripar never holds it.",
-    facts: [
-      { label: "Route", value: "api.ripar.io/a/text/summarize" },
-      { label: "Price", value: "0.010 USDC / request" },
-      { label: "Listed", value: "x402 Bazaar" },
-    ],
-  },
-  {
-    match: /\b(job|bid|hire|label|labell?ing|enrich|address(es)?|escrow)\b/i,
-    tool: {
-      call: `ripar.job.post({ title: "Label 5,000 addresses", budget: 2.5, closes: "15m" })`,
-      result: "ok · escrow held, bidding open",
-    },
-    reply:
-      "Posted. 2.50 USDC sits in escrow and bidding closes in fifteen minutes. Agents carrying the enrichment or labelling skill can bid on it. Escrow only releases against a result that passes the job's verification, so an agent that returns nothing useful is paid nothing.",
-    facts: [
-      { label: "Budget", value: "2.50 USDC" },
-      { label: "Bidding closes", value: "15m" },
-      { label: "Skills wanted", value: "enrichment · labelling" },
-    ],
-  },
-  {
-    match: /\b(workflow|trigger|cron|every|watch|collateral|health|top ?up|when)\b/i,
-    tool: {
-      call: `ripar.workflow.create({ trigger: "cron 5m", steps: 4 })`,
-      result: "ok · draft created, not armed",
-    },
-    reply:
-      "Drafted a four-step chain: a five-minute cron, a paid read of the position health, a condition on the health factor, then the top-up action. It stays a draft until you arm it. Open it under Workflows to move the steps around, rewire the branches, or change what the read costs.",
-    facts: [
-      { label: "Trigger", value: "cron · every 5m" },
-      { label: "Steps", value: "4" },
-      { label: "Cost / run", value: "0.020 USDC" },
-      { label: "State", value: "draft" },
-    ],
-  },
-  {
-    match: /\b(endpoint|deploy|ship|expose|api|handler|route)\b/i,
-    tool: {
-      call: `ripar.endpoint.create({ name: "Wallet Risk Score", price: 0.01 })`,
-      result: "ok · draft created",
-    },
-    reply:
-      "Created it as a draft with a public route and a payout address already attached. Deploy a handler to it and set it live, and the x402 middleware takes care of the quote, the payment check and the receipt for every call.",
-    facts: [
-      { label: "Route", value: "api.ripar.io/a/wallet-risk-score" },
-      { label: "Price", value: "0.010 USDC / request" },
-      { label: "Status", value: "draft" },
-    ],
-  },
-];
-
-const FALLBACK: Omit<Script, "match"> = {
-  reply:
-    "I can price and list an endpoint, draft a workflow, or post a job for agents to bid on. Say which and what it should cost — for example, price my summariser at 0.01 USDC, or post a job to label 5,000 addresses.",
-};
-
+/** Each of these produces a real request against the deployed agent. */
 const SUGGESTIONS = [
-  "Price my summariser at 0.01 USDC and list it",
-  "Post a job to label 5,000 wallet addresses",
-  "Top up collateral when health drops below 1.4",
-  "Create an endpoint that scores wallet risk",
+  "What does the summarise endpoint cost?",
+  "Show me the live 402 challenge",
+  "Who does payment actually go to?",
+  "How long is a quote valid for?",
 ];
+
+const AGENT_ENDPOINT =
+  process.env.NEXT_PUBLIC_AGENT_ENDPOINT ?? "api.ripar.io/api/summarize";
+
 
 const WORD_MS = 30;
 const TOOL_MS = 900;
@@ -151,11 +79,25 @@ export function ChatView({
     timers.current.push(window.setTimeout(fn, ms));
   }
 
-  function send(text: string) {
+  /**
+   * Ask the deployed agent for a real quote.
+   *
+   * This used to pick a canned script and type out a hardcoded reply that
+   * looked like a tool call — `Ran ripar.endpoint.update(...) → ok` — while no
+   * request left the browser. Every number in the answer was written by hand,
+   * and an input the scripts did not match still produced a confident-looking
+   * result. That is the one thing a reviewer checks for, and it made the whole
+   * surface unreadable as evidence.
+   *
+   * Now the tool line is the request that actually goes out, the result line is
+   * what actually came back, and every figure below is decoded from the real
+   * PAYMENT-REQUIRED header. If the agent is unreachable the failure is shown
+   * as a failure, not smoothed into a success.
+   */
+  async function send(text: string) {
     const body = text.trim();
     if (!body || busy) return;
 
-    const script = SCRIPTS.find((s) => s.match.test(body)) ?? FALLBACK;
     const askId = ++counter;
     const replyId = ++counter;
 
@@ -169,12 +111,66 @@ export function ChatView({
         id: replyId,
         role: "ripar",
         text: "",
-        tool: script.tool ? { ...script.tool, done: false } : undefined,
+        tool: {
+          call: `POST ${AGENT_ENDPOINT}  — no payment attached`,
+          result: "asking…",
+          done: false,
+        },
         streaming: true,
       },
     ]);
 
-    const words = script.reply.split(" ");
+    const started = Date.now();
+    let reply: string;
+    let facts: Fact[] | undefined;
+    let result: string;
+
+    try {
+      const res = await fetch("/api/quote", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: body }),
+      });
+      const data = await res.json();
+
+      if (!data.ok || !data.paymentRequiredHeader) {
+        result = `${data.status ?? res.status} · no challenge returned`;
+        reply =
+          data.error ??
+          "The endpoint answered, but not with a payment challenge. Nothing was charged and nothing was signed.";
+      } else {
+        const q = JSON.parse(atob(data.paymentRequiredHeader));
+        const accept = q.accepts?.[0] ?? {};
+        const units = Number(accept.maxAmountRequired ?? accept.amount ?? 0);
+        const price = units / 1_000_000;
+
+        result = `${data.status} · ${data.elapsedMs}ms · ${data.paymentRequiredHeader.length}B header`;
+        reply =
+          `That endpoint is x402-gated. It answered ${data.status} in ${data.elapsedMs}ms and stated its terms in a ` +
+          `PAYMENT-REQUIRED header declaring x402 version ${q.x402Version ?? 2}. It wants ${price} USDC — ` +
+          `${units} base units divided by the asset's six decimals — settled on Algorand under the ${accept.scheme ?? "exact"} ` +
+          `scheme, and it will hold that quote for ${accept.maxTimeoutSeconds ?? "?"} seconds. Attach X-PAYMENT and retry ` +
+          `and the USDC goes straight to the address below. Nothing was paid to fetch this.`;
+        facts = [
+          { label: "Price", value: `${price} USDC (${units} base units)` },
+          { label: "Asset", value: String(accept.asset ?? "—") },
+          { label: "Pays to", value: String(accept.payTo ?? "—") },
+          { label: "Settle within", value: `${accept.maxTimeoutSeconds ?? "?"}s` },
+        ];
+      }
+    } catch (err) {
+      result = `failed after ${Date.now() - started}ms`;
+      reply =
+        "Could not reach the agent to ask for a quote. That is a transport failure, not a refusal — " +
+        "nothing was signed, nothing was charged, and no state changed. " +
+        (err instanceof Error ? err.message : "");
+    }
+
+    setTurns((t) =>
+      t.map((m) => (m.id === replyId && m.tool ? { ...m, tool: { ...m.tool, result, done: true } } : m))
+    );
+
+    const words = reply.split(" ");
     const stream = () => {
       let spoken = 0;
       const next = () => {
@@ -183,21 +179,14 @@ export function ChatView({
         if (spoken < words.length) {
           later(next, WORD_MS);
         } else {
-          setTurns((t) => t.map((m) => (m.id === replyId ? { ...m, streaming: false, facts: script.facts } : m)));
+          setTurns((t) => t.map((m) => (m.id === replyId ? { ...m, streaming: false, facts } : m)));
           setBusy(false);
         }
       };
       later(next, WORD_MS);
     };
+    later(stream, 200);
 
-    if (script.tool) {
-      later(() => {
-        setTurns((t) => t.map((m) => (m.id === replyId && m.tool ? { ...m, tool: { ...m.tool, done: true } } : m)));
-        later(stream, 260);
-      }, TOOL_MS);
-    } else {
-      later(stream, 320);
-    }
   }
 
   function stop() {
@@ -290,8 +279,9 @@ export function ChatView({
       </Sheet>
 
       <p className="mt-2.5 text-[12px] text-neutral-400">
-        Replies are scripted and run in this browser. No model is called and nothing is sent
-        anywhere — this is the shape of the surface, not a live assistant.
+        Every answer here is a real request. The line above each reply is the call that
+        actually went out, and the figures are decoded from the challenge that came back —
+        nothing is scripted and no number is written by hand.
       </p>
     </>
   );
