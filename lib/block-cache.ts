@@ -18,7 +18,28 @@
 
 const blocks = new Map<number, Promise<BlockResponse | null>>();
 
-export type BlockResponse = { transactions?: Record<string, any>[] };
+/**
+ * Only the fields this app actually reads off an indexer transaction. The
+ * indexer returns a far larger envelope, but typing it as Record<string, any>
+ * gave up the one thing a type buys here: if the indexer renames a key — and
+ * these are the kebab-case v2 names, which is exactly the kind of thing that
+ * moves — the read goes quietly undefined instead of failing to compile.
+ */
+export type IndexerTxn = {
+  id: string;
+  note?: string;
+  sender: string;
+  "tx-type": string;
+  "confirmed-round": number;
+  "round-time"?: number;
+  "asset-transfer-transaction"?: {
+    "asset-id": number;
+    amount?: number;
+    receiver: string;
+  };
+};
+
+export type BlockResponse = { transactions?: IndexerTxn[] };
 
 /** Serialise across the whole app, with a small gap, so bursts cannot form. */
 let queue: Promise<unknown> = Promise.resolve();

@@ -31,7 +31,6 @@ const AGENT_ENDPOINT =
 
 
 const WORD_MS = 30;
-const TOOL_MS = 900;
 
 let counter = 0;
 

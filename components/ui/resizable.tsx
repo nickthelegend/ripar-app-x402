@@ -39,6 +39,11 @@ export function useResizable(
     if (saved && !Number.isNaN(saved)) {
       const w = clamp(saved);
       widthRef.current = w;
+      // localStorage does not exist during SSR, so the saved width cannot be
+      // the initial state without breaking hydration — the server would render
+      // the default and the client a different number. Reading it after mount
+      // is the only correct order, and the one extra pass is the cost of that.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWidth(w);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

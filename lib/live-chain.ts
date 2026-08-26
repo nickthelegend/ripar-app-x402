@@ -1,5 +1,6 @@
-import { getBlock } from "./block-cache";
 "use client";
+
+import { getBlock, type BlockResponse } from "./block-cache";
 
 import { useEffect, useState } from "react";
 
@@ -77,7 +78,7 @@ export function useLiveChain(): LiveChain {
         const sample = [...rounds].slice(0, 6);
         // Same shared cache the workspace uses, so these rounds are almost
         // always already in memory and cost no request at all.
-        const blocks: any[] = [];
+        const blocks: (BlockResponse | null)[] = [];
         for (const r of sample) blocks.push(await getBlock(INDEXER, r));
         for (const blk of blocks) {
           for (const t of blk?.transactions ?? []) {

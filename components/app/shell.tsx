@@ -88,7 +88,7 @@ export function AppShell() {
         </div>
 
         <main className="mx-auto max-w-[1120px] px-5 py-7 sm:px-8">
-          {view === "overview" && <OverviewView onGo={go} onAsk={ask} />}
+          {view === "overview" && <OverviewView onAsk={ask} />}
           {view === "chat" && <ChatView seed={seed} turns={turns} setTurns={setTurns} />}
           {view === "endpoints" && <EndpointsView />}
           {view === "workflows" && <WorkflowsView />}

@@ -4,7 +4,6 @@ import { useState } from "react";
 import { ArrowUpRight, CornerDownLeft, ExternalLink, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AGENT_ORIGIN, ago, shortAddr, useWorkspace } from "@/lib/real-data";
-import type { View } from "./sidebar";
 import { EmptyState, Metric, PageHead, Sheet } from "./bits";
 import { networkLabel, txUrl } from "@/lib/explorer";
 
@@ -17,7 +16,7 @@ const PROMPTS = [
 const usd = (n: number, d = 2) =>
   n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 
-export function OverviewView({ onGo, onAsk }: { onGo: (v: View) => void; onAsk: (t: string) => void }) {
+export function OverviewView({ onAsk }: { onAsk: (t: string) => void }) {
   const [prompt, setPrompt] = useState("");
   const { data, status, error } = useWorkspace();
   // The chain these figures were actually read from. Naming a network the app
