@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowUpRight, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { checkAddress } from "@/lib/algorand-address";
@@ -46,6 +46,7 @@ export function RegisterView() {
   const [call, setCall] = useState<ComposedCall | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
+  const inFlight = useRef(false);
 
   const addressCheck = checkAddress(address);
   const trimmedDomain = domain.trim();
@@ -78,7 +79,13 @@ export function RegisterView() {
   const domainTaken = (check.data?.domainAgentId ?? 0) > 0;
   const ready = addressCheck.ok && trimmedDomain.length > 0 && !alreadyRegistered && !domainTaken;
 
+  // Guarded on a ref, not on the state flag below it. setState schedules a
+  // re-render, so clicks dispatched before React commits all read the old value
+  // and every one proceeds — three fast clicks on this button put three
+  // identical requests on the wire. The ref flips on the same tick.
   async function build() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setComposing(true);
     setCall(null);
     setRefused(null);
@@ -87,6 +94,7 @@ export function RegisterView() {
     } catch (e) {
       setRefused((e as Error).message);
     } finally {
+      inFlight.current = false;
       setComposing(false);
     }
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowUpRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { checkAddress } from "@/lib/algorand-address";
@@ -312,10 +312,17 @@ function ActionRow({
   const [call, setCall] = useState<ComposedCall | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
 
   const senderOk = checkAddress(sender).ok;
 
+  // Guarded on a ref, not on the state flag below it. setState schedules a
+  // re-render, so clicks dispatched before React commits all read the old value
+  // and every one proceeds — three fast clicks on this button put three
+  // identical requests on the wire. The ref flips on the same tick.
   async function build() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setCall(null);
     setRefused(null);
@@ -328,6 +335,7 @@ function ActionRow({
     } catch (e) {
       setRefused((e as Error).message);
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -487,6 +495,9 @@ function ActionRow({
   );
 
   async function buildVerdict(passed: boolean) {
+    // Same guard as build(): a double-clicked verdict must not compose twice.
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setCall(null);
     setRefused(null);
@@ -497,6 +508,7 @@ function ActionRow({
     } catch (e) {
       setRefused((e as Error).message);
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
