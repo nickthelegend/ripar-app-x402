@@ -10,9 +10,16 @@ export async function GET(request: Request) {
   if (code) {
     const supabase = await createClient();
     if (supabase) {
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (!error) {
-        return NextResponse.redirect(`${origin}${next}`);
+      try {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (!error) {
+          return NextResponse.redirect(`${origin}${next}`);
+        }
+      } catch {
+        // A session cookie that could not be written now throws out of setAll
+        // rather than being swallowed. Landing on /login with an error is the
+        // honest outcome: without that cookie the user is not signed in, and
+        // redirecting to /dashboard would say otherwise.
       }
     }
   }

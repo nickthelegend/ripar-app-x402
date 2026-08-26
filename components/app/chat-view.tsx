@@ -5,6 +5,7 @@ import { CornerDownLeft, Square } from "lucide-react";
 import { Mark } from "@/components/ui/mark";
 import { cn } from "@/lib/utils";
 import { PageHead, Sheet } from "./bits";
+import { usePrefersReducedMotion } from "@/lib/mission/use-animation-frame";
 
 type Fact = { label: string; value: string };
 
@@ -59,6 +60,10 @@ export function ChatView({
   // Auto-scroll only while the reader is already at the bottom, so reading back
   // through the conversation isn't yanked away mid-sentence.
   const stick = useRef(true);
+  // The transcript is the answer, not the animation. Someone who has asked
+  // the OS for less motion should get the reply, not a word-by-word reveal of
+  // it — every other animated surface here already honours this.
+  const reducedMotion = usePrefersReducedMotion();
 
   const clearTimers = useCallback(() => {
     for (const t of timers.current) window.clearTimeout(t);
@@ -177,6 +182,15 @@ export function ChatView({
       t.map((m) => (m.id === replyId && m.tool ? { ...m, tool: { ...m.tool, result, done: true } } : m))
     );
 
+    if (reducedMotion) {
+      setTurns((t) =>
+        t.map((m) => (m.id === replyId ? { ...m, text: reply, streaming: false, facts } : m))
+      );
+      inFlight.current = false;
+      setBusy(false);
+      return;
+    }
+
     const words = reply.split(" ");
     const stream = () => {
       let spoken = 0;
@@ -209,8 +223,20 @@ export function ChatView({
     if (seeded.current) return;
     const text = (seed ?? "").trim();
     if (!text) return;
-    seeded.current = true;
-    void send(text);
+    // Deferred rather than called in the effect body: send() sets state on its
+    // first line, and doing that straight from an effect cascades renders.
+    //
+    // NOT routed through `later`. That list is cleared on unmount, and React's
+    // dev double-invoke mounts, tears down and remounts — which cancelled the
+    // send while `seeded` stayed latched, so the remount skipped it and the
+    // one-click flow silently became two clicks again. The flag is set inside
+    // the callback instead: cancelled before it fires means it never happened,
+    // so the remount is free to try again.
+    const id = window.setTimeout(() => {
+      seeded.current = true;
+      void send(text);
+    }, 0);
+    return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed]);
 
