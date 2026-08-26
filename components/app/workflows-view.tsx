@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Play, Plus } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -83,6 +83,11 @@ export function WorkflowsView() {
   // invented ones would be the same fabrication we removed everywhere else.
   // WORKFLOWS remains importable as starter templates via 'New workflow'.
   const [items, setItems] = useState<Workflow[]>([]);
+  // `running` is state, so it cannot gate run(): setState schedules a
+  // re-render and clicks dispatched before React commits all read null. Three
+  // fast clicks on "Run now" issued three real 402 requests to the deployed
+  // agent — the one guard here where the duplicates leave the browser.
+  const inFlight = useRef(false);
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [running, setRunning] = useState<{ id: string; step: number } | null>(null);
@@ -105,11 +110,16 @@ export function WorkflowsView() {
    * The steps that cannot execute say so instead of being animated past.
    */
   async function run(w: Workflow) {
-    if (running) return;
-    if (w.steps.length === 0) return toast("Nothing to run — this workflow has no steps yet", "error");
+    if (inFlight.current || running) return;
+    inFlight.current = true;
+    if (w.steps.length === 0) {
+      inFlight.current = false;
+      return toast("Nothing to run — this workflow has no steps yet", "error");
+    }
 
     const endpoints = workspace.data?.endpoints ?? [];
     if (!endpoints.some((e) => e.live) && w.steps.some((st) => st.kind === "call")) {
+      inFlight.current = false;
       return toast("No live endpoint in the manifest to call — nothing would be requested", "error");
     }
 
@@ -120,6 +130,7 @@ export function WorkflowsView() {
         onStep: (i) => setRunning({ id: w.id, step: i }),
       });
     } finally {
+      inFlight.current = false;
       setRunning(null);
     }
 
