@@ -15,6 +15,14 @@ updates:
       # here are taken deliberately, not merged from a bot.
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # eslint 10 removed context.getFilename(). eslint-plugin-react still
+      # calls it, so the bump does not surface lint findings — it crashes the
+      # run outright. The latest published eslint-plugin-react, -jsx-a11y and
+      # -import all still cap their peer at eslint 9, so there is nothing to
+      # bump alongside it and no override that helps. Blocked upstream, not
+      # declined: drop this entry once those plugins support 10.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
       # Next and React majors move together with the whole app; same reasoning.
       - dependency-name: next
         update-types: ["version-update:semver-major"]
