@@ -79,7 +79,9 @@ export function ReceiptsView() {
   const [sort, setSort] = useState<{ field: Field; dir: "asc" | "desc" }>({ field: "when", dir: "desc" });
   const { toast } = useToast();
 
-  const runs = data?.runs ?? [];
+  // Memoised because `?? []` builds a fresh array on every render, which
+  // changed the deps of every useMemo below it and defeated all of them.
+  const runs = useMemo(() => data?.runs ?? [], [data?.runs]);
   const payTo = data?.manifest?.payTo;
   // The chain these rows were actually read from. The fallback is never on
   // screen — a row only exists once `data` is in hand, and so has a network.

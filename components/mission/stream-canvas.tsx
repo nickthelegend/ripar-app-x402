@@ -1,5 +1,21 @@
 "use client";
 
+/*
+ * `renderer` is a StreamRenderer held in a useMemo: a mutable canvas engine,
+ * deliberately kept alive across renders. Driving it means assigning to it —
+ * onCeremony, fontFamily, reducedMotion — from effects and from the animation
+ * callback, which is what effects are for and the only way to talk to an
+ * imperative renderer.
+ *
+ * react-hooks/immutability treats a memoized value as immutable and cannot
+ * tell that apart from mutating React-owned state during render, which IS a
+ * bug. The two real instances of that in this directory were fixed rather than
+ * silenced: the tooltip `flip` read a ref during render (stale after a resize),
+ * and bits.tsx wrote one during render. The exception below covers only the
+ * engine mutations, and only in this file.
+ */
+/* eslint-disable react-hooks/immutability */
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { StreamRenderer, type Ceremony } from "@/lib/mission/renderer";
 import { useAnimationFrame, usePrefersReducedMotion } from "@/lib/mission/use-animation-frame";
@@ -27,7 +43,18 @@ export function StreamCanvas({ onCeremony }: { onCeremony?: (c: Ceremony | null)
   const buffer = useRef<Settlement[]>([]);
   const hoverId = useRef(-1);
 
-  const [hover, setHover] = useState<{ agent: Agent; x: number; y: number } | null>(null);
+  // `flip` is decided here rather than during render. It depends on the
+  // measured width, which lives in a ref — and a ref read during render is
+  // untracked, so after a resize the tooltip could be placed against the
+  // previous width until something else re-rendered. Deciding it where the
+  // hover is captured reads the same ref from a callback, which is legal and
+  // always current.
+  const [hover, setHover] = useState<{
+    agent: Agent;
+    x: number;
+    y: number;
+    flip: boolean;
+  } | null>(null);
 
   useEffect(() => {
     renderer.onCeremony = onCeremony ?? null;
@@ -92,7 +119,9 @@ export function StreamCanvas({ onCeremony }: { onCeremony?: (c: Ceremony | null)
     if (id !== hoverId.current) {
       hoverId.current = id;
       const p = renderer.hoveredPoint();
-      setHover(a && p ? { agent: a, x: p.x, y: p.y } : null);
+      setHover(
+        a && p ? { agent: a, x: p.x, y: p.y, flip: p.x > rect.current.width - 250 } : null
+      );
     }
   });
 
@@ -100,7 +129,6 @@ export function StreamCanvas({ onCeremony }: { onCeremony?: (c: Ceremony | null)
     renderer.setPointer(e.clientX - rect.current.left, e.clientY - rect.current.top);
   };
 
-  const flip = hover ? hover.x > rect.current.width - 250 : false;
 
   return (
     <div ref={wrap} className="absolute inset-0 overflow-hidden">
@@ -119,7 +147,7 @@ export function StreamCanvas({ onCeremony }: { onCeremony?: (c: Ceremony | null)
           style={{
             left: hover.x,
             top: hover.y,
-            transform: `translate(${flip ? "calc(-100% - 22px)" : "22px"}, -50%)`,
+            transform: `translate(${hover.flip ? "calc(-100% - 22px)" : "22px"}, -50%)`,
           }}
         >
           <Glass className="w-[236px] p-3.5">

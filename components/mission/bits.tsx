@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { dna } from "@/lib/mission/dna";
 import { useAnimationFrame } from "@/lib/mission/use-animation-frame";
@@ -56,7 +56,14 @@ export function Odometer({
   const el = useRef<HTMLSpanElement>(null);
   const shown = useRef(value);
   const target = useRef(value);
-  target.current = value;
+  // Synced in an effect, not during render. Render can run more than once for a
+  // single commit and can be thrown away entirely, so a ref written there is
+  // written for work that may never land. The animation reads target.current
+  // each frame and the effect runs on commit, so the value it sees is the one
+  // that was actually rendered.
+  useEffect(() => {
+    target.current = value;
+  }, [value]);
 
   useAnimationFrame((dt) => {
     const gap = target.current - shown.current;

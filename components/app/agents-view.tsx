@@ -34,7 +34,9 @@ export function AgentsView() {
   });
   const [open, setOpen] = useState<RealAgent | null>(null);
 
-  const agents = data?.agents ?? [];
+  // Memoised because `?? []` builds a fresh array on every render, which
+  // changed the deps of every useMemo below it and defeated all of them.
+  const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
   // Named from the chain these rows were actually read off, never assumed —
   // the app follows whichever network the agent's manifest declares.
   const net = networkLabel(data?.chain.network ?? "testnet");
