@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { AGENT_ORIGIN, MANIFEST_ROUTE } from "./agent-origin";
 
 /**
@@ -247,7 +254,15 @@ export type Workspace = {
   mine: { calls: number; earnedUsdc: number };
 };
 
-export function useWorkspace(): Loadable<Workspace> {
+/**
+ * The polling implementation. Private: everything reaches it through
+ * `useWorkspace`, which shares ONE of these across the whole shell.
+ *
+ * `enabled` exists so the hook can be called unconditionally — React forbids
+ * a conditional hook — while still doing nothing when a provider above is
+ * already polling.
+ */
+function useWorkspacePoll(enabled: boolean): Loadable<Workspace> {
   const [s, setS] = useState<Loadable<Workspace>>({
     data: null,
     status: "loading",
@@ -255,6 +270,7 @@ export function useWorkspace(): Loadable<Workspace> {
   });
 
   useEffect(() => {
+    if (!enabled) return;
     const ac = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     let stopped = false;
@@ -334,9 +350,38 @@ export function useWorkspace(): Loadable<Workspace> {
       ac.abort();
       clearTimeout(timer);
     };
-  }, []);
+  }, [enabled]);
 
   return s;
+}
+
+/**
+ * One poller for the whole workspace.
+ *
+ * Seven components call `useWorkspace` — the shell, the sidebar, the ⌘K
+ * palette and four views — and each call used to mount its own copy of the
+ * hook above. That meant one independent 30s poller per mounted consumer, all
+ * fetching byte-identical data: a fresh dashboard load fired the manifest four
+ * times, and navigating between views stacked more on top. Two of those
+ * concurrent calls came back 502 from the proxy, which is the honest cost of
+ * asking the same upstream the same question four times at once.
+ *
+ * Reads stay live — the 30s cadence and the no-store proxy are unchanged. Only
+ * the duplication goes.
+ */
+const WorkspaceContext = createContext<Loadable<Workspace> | null>(null);
+
+export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const value = useWorkspacePoll(true);
+  return createElement(WorkspaceContext.Provider, { value }, children);
+}
+
+export function useWorkspace(): Loadable<Workspace> {
+  const shared = useContext(WorkspaceContext);
+  // Called unconditionally to satisfy the rules of hooks, but inert whenever a
+  // provider is above: a consumer rendered outside one still works on its own.
+  const own = useWorkspacePoll(shared === null);
+  return shared ?? own;
 }
 
 export const shortAddr = (a: string, head = 6, tail = 4) =>

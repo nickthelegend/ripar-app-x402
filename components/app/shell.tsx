@@ -5,7 +5,7 @@ import { Menu as MenuIcon, X } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { useDialogStack } from "@/components/ui/dialog-stack";
 import { cn } from "@/lib/utils";
-import { shortAddr, useWorkspace } from "@/lib/real-data";
+import { WorkspaceProvider, shortAddr, useWorkspace } from "@/lib/real-data";
 import { shortAddress } from "@/lib/algorand-address";
 import { useSettings } from "@/lib/settings";
 import { NAV, Sidebar, type View } from "./sidebar";
@@ -63,6 +63,7 @@ export function AppShell() {
   );
 
   return (
+    <WorkspaceProvider>
     <div className="flex min-h-dvh bg-[#fafafa]">
       {/* desktop rail */}
       <aside className="sticky top-0 hidden h-dvh w-[228px] shrink-0 border-r border-black/[0.07] bg-white lg:block">
@@ -131,6 +132,7 @@ export function AppShell() {
         </div>
       </Modal>
     </div>
+    </WorkspaceProvider>
   );
 }
 
