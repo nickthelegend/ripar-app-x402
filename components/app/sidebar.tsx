@@ -55,7 +55,14 @@ export function Sidebar({
   const chainName = networkLabel(ws?.chain.network ?? "testnet");
   const earned = ws?.mine.earnedUsdc ?? 0;
   const calls = ws?.mine.calls ?? 0;
-  const initials = name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
+  // Signed out is a real state here, not a placeholder to paper over: the auth
+  // backend for this deployment is unreachable, so nobody is signed in. Saying
+  // so is better than the persona this used to render, which showed every
+  // visitor an account they had never created.
+  const signedIn = name.trim().length > 0;
+  const initials = signedIn
+    ? name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("")
+    : "—";
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -128,12 +135,16 @@ export function Sidebar({
               onClick={toggle}
               className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-black/[0.03]"
             >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-red-500 text-[9px] font-bold text-white">
+              <span className={
+                  signedIn
+                    ? "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-red-500 text-[9px] font-bold text-white"
+                    : "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-[9px] font-bold text-neutral-500"
+                }>
                 {initials}
               </span>
               <span className="min-w-0 leading-tight">
-                <span className="block truncate text-[12.5px] font-medium text-neutral-800">{name}</span>
-                <span className="block truncate font-mono text-[10.5px] text-neutral-400">{shortAddress(payout)}</span>
+                <span className="block truncate text-[12.5px] font-medium text-neutral-800">{signedIn ? name : "Not signed in"}</span>
+                <span className="block truncate font-mono text-[10.5px] text-neutral-400">{payout ? shortAddress(payout) : "browsing read-only"}</span>
               </span>
             </button>
           )}

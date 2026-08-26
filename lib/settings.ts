@@ -39,20 +39,30 @@ export type Settings = {
   keys: ApiKey[];
 };
 
-// A real, checksum-valid address so the app is never demonstrating an invalid
-// one. It belongs to no wallet — it is derived from a fixed label.
-const SAMPLE_PAYOUT = "NWYNM3QBRXMDICW4PCNMV4LAVA52CKM4KL7IVGSXZ46EFLFCZXXR2MBEUM";
-
+/**
+ * The signed-out default.
+ *
+ * This used to be a persona — "Ava Chen", ava@example.com, a "Sample
+ * workspace", a payout address derived from a fixed label, and two invented
+ * API keys with plausible prefixes and a "lastUsed: 4 min ago". The auth
+ * backend for this deployment is not reachable, so that persona is what every
+ * visitor saw: an account they never created, holding credentials that never
+ * existed. It reads as fabricated traction, and on a surface whose entire
+ * argument is "check this against the chain yourself" that is the one thing it
+ * cannot afford to look like.
+ *
+ * Signed out, the app now says so. The payout address is left empty rather than
+ * filled with a lookalike: the Overview and Receipts views already read the
+ * real payout from the deployed agent's own manifest, and an address nobody
+ * holds the key to is worse than no address at all.
+ */
 const DEFAULT_SETTINGS: Settings = {
-  name: "Ava Chen",
-  email: "ava@example.com",
-  org: "Sample workspace",
-  payout: SAMPLE_PAYOUT,
+  name: "",
+  email: "",
+  org: "",
+  payout: "",
   caps: { enabled: true, perCall: 0.5, daily: 25, monthly: 400 },
-  keys: [
-    { id: "key_live_9f21", name: "Production server", prefix: "rpk_live", last4: "9c4e", created: "12 Jun 2026", lastUsed: "4 min ago" },
-    { id: "key_test_3a70", name: "Local development", prefix: "rpk_test", last4: "1b83", created: "2 Jul 2026", lastUsed: null },
-  ],
+  keys: [],
 };
 
 const KEY = "ripar-settings";
