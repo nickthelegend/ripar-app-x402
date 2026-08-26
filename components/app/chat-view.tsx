@@ -46,6 +46,13 @@ export function ChatView({
 }) {
   const [draft, setDraft] = useState(seed ?? "");
   const [busy, setBusy] = useState(false);
+  // `busy` drives the UI, but it cannot gate the handler: setBusy schedules a
+  // re-render, so several clicks dispatched before React commits all read the
+  // old value and every one of them proceeds. Three fast clicks on send put two
+  // real requests on the wire and left the transcript with neither tool line,
+  // because the overlapping handlers wrote over each other's state. The ref
+  // flips synchronously, so the second click sees it on the same tick.
+  const inFlight = useRef(false);
 
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -96,7 +103,8 @@ export function ChatView({
    */
   async function send(text: string) {
     const body = text.trim();
-    if (!body || busy) return;
+    if (!body || inFlight.current) return;
+    inFlight.current = true;
 
     const askId = ++counter;
     const replyId = ++counter;
@@ -180,6 +188,7 @@ export function ChatView({
           later(next, WORD_MS);
         } else {
           setTurns((t) => t.map((m) => (m.id === replyId ? { ...m, streaming: false, facts } : m)));
+          inFlight.current = false;
           setBusy(false);
         }
       };
@@ -189,9 +198,29 @@ export function ChatView({
 
   }
 
+  // The Overview hero hands its text over as `seed`. It used to only prefill the
+  // composer, so the flow the page calls "in one click" actually took two: type
+  // and send on Overview, land on Chat, then send again. Someone who does not
+  // notice the second step concludes the button is broken.
+  //
+  // Sent once, guarded on the ref so it cannot double-fire alongside a manual
+  // send, and cleared so switching back to Chat later does not replay it.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current) return;
+    const text = (seed ?? "").trim();
+    if (!text) return;
+    seeded.current = true;
+    void send(text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed]);
+
   function stop() {
     clearTimers();
     setTurns((t) => t.map((m) => (m.streaming ? { ...m, streaming: false, stopped: true } : m)));
+    // Release the send guard too — without this, stopping a reply would leave
+    // inFlight stuck true and the composer permanently dead.
+    inFlight.current = false;
     setBusy(false);
   }
 
