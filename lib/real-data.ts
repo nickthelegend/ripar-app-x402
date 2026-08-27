@@ -74,13 +74,34 @@ const decode = (b64?: string) => {
 
 import { getBlock, type BlockResponse } from "./block-cache";
 
+/** Every browser-side read here goes through one deadline. */
+const REQUEST_TIMEOUT_MS = 12_000;
+
 async function j<T>(url: string, signal?: AbortSignal): Promise<T> {
   // AlgoNode is a free public endpoint and it rate-limits. A 429 is not a
   // failure of the query, it is the node asking us to slow down, so retry it
   // with backoff rather than surfacing a gap in the data.
   for (let attempt = 0; ; attempt++) {
-    const r = await fetch(url, { signal, cache: "no-store" });
+    // A deadline per attempt, combined with the caller's own signal.
+    //
+    // Without this there is no timeout anywhere on the browser side: the only
+    // abort is the effect cleanup, so a request that never answers keeps the
+    // dashboard on "reading the chain…" for as long as the tab is open. The
+    // manifest route protects itself from a hung agent with an 8s timeout, but
+    // the browser's request TO that route had none, so a stalled function
+    // stalled every tile behind it indefinitely.
+    const timer = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const combined = signal ? AbortSignal.any([signal, timer]) : timer;
+
+    const r = await fetch(url, { signal: combined, cache: "no-store" });
     if (r.ok) return r.json() as Promise<T>;
+
+    // Drain the body of a response we are not going to read. An unread body
+    // holds its HTTP/2 stream open — that is what leaves an entry sitting at
+    // "pending" in the network panel forever, and it is a real socket, not
+    // just a cosmetic row.
+    await r.body?.cancel().catch(() => {});
+
     if (r.status !== 429 || attempt >= 3) throw new Error(`${r.status} ${r.statusText}`);
     await new Promise((res) => setTimeout(res, 250 * 2 ** attempt));
   }
@@ -262,6 +283,35 @@ export type Workspace = {
  * a conditional hook — while still doing nothing when a provider above is
  * already polling.
  */
+/**
+ * Seconds per block, inferred from two settlements far enough apart to be
+ * meaningful.
+ *
+ * Returns null rather than a guess when there is not enough spread: with fewer
+ * than two runs, or two that landed in the same round, there is no interval to
+ * divide by, and "measuring…" is the honest answer.
+ */
+function measureBlockTime(runs: RealRun[]): number | null {
+  const usable = runs.filter((r) => r.round > 0 && r.when > 0);
+  if (usable.length < 2) return null;
+
+  let newest = usable[0];
+  let oldest = usable[0];
+  for (const r of usable) {
+    if (r.round > newest.round) newest = r;
+    if (r.round < oldest.round) oldest = r;
+  }
+
+  const rounds = newest.round - oldest.round;
+  const seconds = (newest.when - oldest.when) / 1000;
+  if (rounds <= 0 || seconds <= 0) return null;
+
+  const per = seconds / rounds;
+  // A real Algorand block is well inside this range. Outside it, the sample is
+  // not what we think it is — and a wrong number is worse than none.
+  return per > 0.2 && per < 30 ? per : null;
+}
+
 function useWorkspacePoll(enabled: boolean): Loadable<Workspace> {
   const [s, setS] = useState<Loadable<Workspace>>({
     data: null,
@@ -295,16 +345,16 @@ function useWorkspacePoll(enabled: boolean): Loadable<Workspace> {
         ]);
 
         const head = status["last-round"];
-        let blockTime: number | null = null;
-        try {
-          const [a, b] = await Promise.all([
-            j<{ block: { ts: number } }>(`${ALGOD}/v2/blocks/${head - 5}?format=json`, ac.signal),
-            j<{ block: { ts: number } }>(`${ALGOD}/v2/blocks/${head - 1}?format=json`, ac.signal),
-          ]);
-          blockTime = (b.block.ts - a.block.ts) / 4;
-        } catch {
-          /* the round alone is still worth showing */
-        }
+        // Block time from the settlements already in hand, not two more round
+        // trips.
+        //
+        // This used to fetch /v2/blocks/{head-5} and /v2/blocks/{head-1} with
+        // ?format=json purely to subtract two timestamps. Those were the last
+        // two hops of the load and they bought nothing: every run below already
+        // carries the round it landed in AND its wall-clock time, so the same
+        // figure is a subtraction over a far longer baseline at zero request
+        // cost. Two fewer requests per poll, and two fewer things that can hang.
+        const blockTime = measureBlockTime(runs);
 
         const payTo = manifest?.payTo;
         const mineRuns = payTo ? runs.filter((r) => r.to === payTo) : [];

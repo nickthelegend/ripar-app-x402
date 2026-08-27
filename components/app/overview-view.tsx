@@ -103,15 +103,28 @@ export function OverviewView({ onAsk }: { onAsk: (t: string) => void }) {
       <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-black/[0.07] sm:grid-cols-4">
         {[
           {
+            // Both of these are ABOUT the agent, so both need the manifest: it
+            // is what names the payout address to filter settlements by. When
+            // it could not be read we do not know the figure, and "0.00" would
+            // be a claim rather than a reading — the one thing this dashboard
+            // refuses to do. Show a dash and say why.
             label: "You have earned",
-            value: data ? usd(data.mine.earnedUsdc) : "—",
+            value: data && data.manifest ? usd(data.mine.earnedUsdc) : "—",
             unit: "USDC",
-            hint: data ? `${data.mine.calls} paid calls to your address` : "reading the chain…",
+            hint: !data
+              ? "reading the chain…"
+              : data.manifest
+                ? `${data.mine.calls} paid calls to your address`
+                : "manifest unavailable — cannot tell",
           },
           {
             label: "Your endpoints live",
-            value: data ? String(data.endpoints.length) : "—",
-            hint: data?.manifest ? data.manifest.handle : "no manifest yet",
+            value: data && data.manifest ? String(data.endpoints.length) : "—",
+            hint: !data
+              ? "reading the chain…"
+              : data.manifest
+                ? data.manifest.handle
+                : "manifest unavailable — cannot tell",
           },
           {
             label: "Network settlements",
