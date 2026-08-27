@@ -24,7 +24,10 @@ const cards = [
   { title: "Create Agent", desc: "LLM-powered agents for your org.", Icon: Bot },
   { title: "Create Workflow", desc: "Automate multi-step work across your apps.", Icon: Wand2 },
   { title: "Post a job", desc: "Let agents bid, pay on a verified result.", Icon: Sparkles },
-  { title: "Workflows", desc: "Triggers, retries, guaranteed runs.", Icon: Database },
+  // NOT "guaranteed runs". Nothing here guarantees a run: a workflow step is an
+  // HTTP call to somebody else's endpoint, and the same claim was already taken
+  // out of the landing copy for being untrue. It survived here.
+  { title: "Workflows", desc: "Triggers, conditions, retries.", Icon: Database },
   { title: "Create Deployment", desc: "Ship projects to production.", Icon: Rocket },
 ];
 
@@ -84,11 +87,18 @@ export function DashboardPreview() {
                   </div>
                 ))}
               </div>
+              {/* These were `demo-uriach` and `demo-carbonell`. Uriach and
+                  Carbonell are real Spanish companies, and neither is a
+                  customer — the same two names were removed from a "Trusted by"
+                  strip at the bottom of this very file for exactly that reason,
+                  and they simply moved up here into Recents. A workspace name
+                  on a login page is a quieter claim than a logo, not a truer
+                  one. Replaced with the views this product actually ships. */}
               <div className="mt-4 text-[8px] uppercase tracking-wide text-white/30">Recents</div>
               <div className="mt-1.5 space-y-1 text-[10px] text-white/50">
-                <div>Test</div>
-                <div>demo-uriach</div>
-                <div>demo-carbonell</div>
+                <div>summariser</div>
+                <div>job board</div>
+                <div>receipts</div>
               </div>
               {/* No "credits used" bar. There are no credits and no plan to
                   upgrade — Ripar is paid per request, in the 402, and there is
@@ -104,7 +114,11 @@ export function DashboardPreview() {
 
             {/* main */}
             <div className="flex-1 p-5">
-              <div className="text-lg font-semibold">Good afternoon, John Doe</div>
+              {/* Not "Good afternoon, John Doe". There is no John Doe, and a
+                  greeting is the one line on a login page that asserts a person
+                  exists. The product name says what this is without inventing
+                  someone to have used it. */}
+              <div className="text-lg font-semibold">Your workspace</div>
 
               <div className="mt-4 grid grid-cols-5 gap-2">
                 {cards.map((c) => (
@@ -125,7 +139,11 @@ export function DashboardPreview() {
 
               <div className="mt-5 text-[11px] font-medium text-white/70">Latest Projects</div>
               <div className="mt-2 grid grid-cols-3 gap-2">
-                {["Demo Chemical Corp", "Demo Test", "Demo Public Gov"].map((p, i) => (
+                {/* Named companies, even prefixed "Demo", read as customers.
+                    These are the endpoint kinds the SDK actually scaffolds
+                    (`ripar init --template basic|llm|oracle`), which illustrate
+                    the product without implying anyone has bought it. */}
+                {["summariser", "llm-completion", "price-oracle"].map((p, i) => (
                   <div key={p} className="rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
                     <div className="flex items-center gap-1.5">
                       <span className={`h-1.5 w-1.5 rounded-full ${i === 0 ? "bg-emerald-400" : "bg-white/20"}`} />
