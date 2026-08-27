@@ -30,9 +30,15 @@ export function TopRail() {
         </Label>
         {/* The elapsed clock lived here. It told you nothing you needed and it
             was the only thing on screen changing every second for no reason. */}
+        {/* "Running", not "Live". The pulse means the simulation is advancing,
+            but the word sat about twenty pixels from the Simulated badge and
+            directly above a revenue figure — so a reader saw a green dot
+            labelled Live and took the money for real. Two labels that
+            contradict each other cancel out, and the one that survives is
+            always the flattering one. This says what is actually running. */}
         <span className="flex items-center gap-2">
           <Pulse />
-          <Label className="text-mint/70">Live</Label>
+          <Label className="text-mint/70">Running</Label>
         </span>
       </div>
     </header>
