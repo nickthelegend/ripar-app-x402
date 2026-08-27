@@ -37,6 +37,15 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      # Lint is here because it was not, and eleven problems accumulated
+      # unnoticed as a result — among them two refs touched during render
+      # (unsound: render can run twice per commit and can be discarded) and two
+      # useMemos whose deps changed every render, so they never memoised
+      # anything. tsc and next build pass all four. Nothing else in this
+      # pipeline would ever have said so.
+      - name: Lint
+        run: npx eslint .
+
       # No Supabase env in CI, on purpose. Demo mode is a supported way to run
       # this app, so the build has to survive createClient() returning null —
       # and a green build here proves it still does.
