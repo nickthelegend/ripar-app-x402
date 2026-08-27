@@ -74,8 +74,16 @@ const decode = (b64?: string) => {
 
 import { getBlock, type BlockResponse } from "./block-cache";
 
-/** Every browser-side read here goes through one deadline. */
-const REQUEST_TIMEOUT_MS = 12_000;
+/** Every browser-side read here goes through one deadline.
+ *
+ * 30s, not 12s. The point of this deadline is to stop a request that will
+ * NEVER answer from pinning the dashboard on "reading the chain…" forever —
+ * it is not a latency budget. AlgoNode degrades sometimes: measured here at a
+ * 5s connect against a normal 50ms, and a cold load makes a dozen sequential
+ * block reads. At 12s those merely-slow reads were aborting, which turned a
+ * load that used to finish in ~30s into one that finished not at all. A hang
+ * is still caught; a slow upstream is now ridden out. */
+const REQUEST_TIMEOUT_MS = 30_000;
 
 async function j<T>(url: string, signal?: AbortSignal): Promise<T> {
   // AlgoNode is a free public endpoint and it rate-limits. A 429 is not a

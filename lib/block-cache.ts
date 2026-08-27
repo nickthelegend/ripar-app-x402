@@ -21,7 +21,7 @@
 // so a MainNet read could be served a cached TestNet body.
 /** Deadline for one block read. Mirrors the one in real-data.ts; kept local
  * because real-data imports from this module and the reverse would be circular. */
-const REQUEST_TIMEOUT_MS = 12_000;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 const blocks = new Map<string, Promise<BlockResponse | null>>();
 
