@@ -29,15 +29,21 @@ export function AuthPanel() {
   // Supabase dashboard and the button appears, with no code change here.
   // `null` means we have not heard back yet, and we render nothing rather than
   // flashing buttons that may vanish.
-  const [enabled, setEnabled] = useState<Set<Provider> | null>(null);
+  //
+  // The "no keys configured" answer is known before the first render, so it is
+  // the initial state rather than a setState inside the effect — calling
+  // setState synchronously in an effect body cascades an extra render, which
+  // the react-hooks rule flags and which is avoidable here.
+  const [enabled, setEnabled] = useState<Set<Provider> | null>(() =>
+    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+      ? null
+      : new Set<Provider>()
+  );
 
   useEffect(() => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-    if (!url || !key) {
-      setEnabled(new Set());
-      return;
-    }
+    if (!url || !key) return;
     let live = true;
     fetch(`${url}/auth/v1/settings`, { headers: { apikey: key }, cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
