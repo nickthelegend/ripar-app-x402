@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -15,6 +15,45 @@ export function AuthPanel() {
   const [loading, setLoading] = useState<Provider | "email" | null>(null);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Which OAuth providers this project actually has enabled.
+  //
+  // Rendering all three unconditionally meant showing buttons that could not
+  // work: only `email` is enabled here, so Google, Microsoft and GitHub each
+  // returned "Unsupported provider: provider is not enabled" the moment anyone
+  // clicked. A control that cannot do the thing it names is the same class of
+  // problem as inventing a person on this page — it promises something that is
+  // not there.
+  //
+  // Asking the project means this corrects itself: enable Google in the
+  // Supabase dashboard and the button appears, with no code change here.
+  // `null` means we have not heard back yet, and we render nothing rather than
+  // flashing buttons that may vanish.
+  const [enabled, setEnabled] = useState<Set<Provider> | null>(null);
+
+  useEffect(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    if (!url || !key) {
+      setEnabled(new Set());
+      return;
+    }
+    let live = true;
+    fetch(`${url}/auth/v1/settings`, { headers: { apikey: key }, cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { external?: Record<string, boolean> } | null) => {
+        if (!live) return;
+        const ext = d?.external ?? {};
+        setEnabled(
+          new Set((["google", "azure", "github"] as Provider[]).filter((p) => ext[p]))
+        );
+      })
+      // A failure here must not hide email sign-in, which does not depend on it.
+      .catch(() => live && setEnabled(new Set()));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const redirectTo =
     typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined;
@@ -109,19 +148,27 @@ export function AuthPanel() {
           </div>
         ) : (
           <>
-            <div className="mt-8 space-y-3">
-              <OAuthButton onClick={() => oauth("google")} loading={loading === "google"} icon={<GoogleLogo />}>
-                Continue with Google
-              </OAuthButton>
-              <OAuthButton onClick={() => oauth("azure")} loading={loading === "azure"} icon={<MicrosoftLogo />}>
-                Continue with Microsoft
-              </OAuthButton>
-              <OAuthButton onClick={() => oauth("github")} loading={loading === "github"} icon={<GitHubLogo />}>
-                Continue with GitHub
-              </OAuthButton>
-            </div>
+            {enabled && enabled.size > 0 ? (
+              <div className="mt-8 space-y-3">
+                {enabled.has("google") ? (
+                  <OAuthButton onClick={() => oauth("google")} loading={loading === "google"} icon={<GoogleLogo />}>
+                    Continue with Google
+                  </OAuthButton>
+                ) : null}
+                {enabled.has("azure") ? (
+                  <OAuthButton onClick={() => oauth("azure")} loading={loading === "azure"} icon={<MicrosoftLogo />}>
+                    Continue with Microsoft
+                  </OAuthButton>
+                ) : null}
+                {enabled.has("github") ? (
+                  <OAuthButton onClick={() => oauth("github")} loading={loading === "github"} icon={<GitHubLogo />}>
+                    Continue with GitHub
+                  </OAuthButton>
+                ) : null}
+              </div>
+            ) : null}
 
-            <div className="my-6 flex items-center gap-4">
+            <div className={cn("flex items-center gap-4", enabled && enabled.size > 0 ? "my-6" : "sr-only")}>
               <span className="h-px flex-1 bg-neutral-200" />
               <span className="text-sm text-neutral-400">or</span>
               <span className="h-px flex-1 bg-neutral-200" />
