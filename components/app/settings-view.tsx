@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AlertTriangle, Check, KeyRound, Plus, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
@@ -8,16 +8,45 @@ import { cn } from "@/lib/utils";
 import { usd } from "@/lib/app-data";
 import { ADDRESS_LENGTH, checkAddress, shortAddress } from "@/lib/algorand-address";
 import { maskKey, mintApiKey, saveSettings, useSettings, type ApiKey, type SpendCaps } from "@/lib/settings";
+import { schemaState, type SchemaState } from "@/lib/db";
 import { CopyButton, PageHead, Sheet, SortHeader } from "./bits";
 
 export function SettingsView() {
   const s = useSettings();
+
+  // Whether anything on this page actually persists.
+  //
+  // The data layer degrades to local-only when the migration has not been
+  // applied — the right fallback, but silent: an edit looks saved and the write
+  // is dropped. Ask the project once and say which mode this is.
+  const [schema, setSchema] = useState<SchemaState>("unknown");
+  useEffect(() => {
+    let live = true;
+    void schemaState().then((v) => live && setSchema(v));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Each section holds a draft. Keying on the saved value resets that draft
   // when the store changes — which is both how the stored settings arrive after
   // hydration and how a save is confirmed — with no effect syncing the two.
   return (
     <>
+      {schema === "missing" ? (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+          <p className="text-[12.5px] leading-relaxed text-amber-900">
+            <span className="font-medium">Nothing on this page is being saved to a database.</span>{" "}
+            The Supabase project answers, but its tables are not there — the migration in{" "}
+            <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11.5px]">
+              supabase/migrations/0001_init.sql
+            </code>{" "}
+            has not been applied. Edits are kept in this browser and will not follow you to another
+            device. Apply the migration to make them durable.
+          </p>
+        </div>
+      ) : null}
       <PageHead
         title="Settings"
         subtitle="Who you are, where settlement pays, what you intend this workspace to spend, and the keys that can call it."

@@ -19,6 +19,40 @@ async function session() {
   }
 }
 
+/* ------------------------------ schema probe ------------------------------ */
+
+/**
+ * Whether the migration has actually been applied to the project this app
+ * points at.
+ *
+ * Every read below returns null and every write is a no-op when the tables are
+ * absent, which is the right fallback — but it is indistinguishable from
+ * "signed in, nothing saved yet". The deployed app has been running against a
+ * project with no schema, so profile edits looked saved and went nowhere: the
+ * UI kept its local copy and the write failed silently into `.catch(() => {})`.
+ *
+ * PostgREST answers a missing table with PGRST205 specifically, which is what
+ * makes this checkable rather than a guess. Returns:
+ *   "ready"    — tables exist, writes durable
+ *   "missing"  — reachable, but the migration has not been applied
+ *   "unknown"  — no client, no session, or the host did not answer
+ */
+export type SchemaState = "ready" | "missing" | "unknown";
+
+export async function schemaState(): Promise<SchemaState> {
+  const supabase = createClient();
+  if (!supabase) return "unknown";
+  try {
+    const { error } = await supabase.from("profiles").select("id").limit(1);
+    if (!error) return "ready";
+    // PGRST205 is "could not find the table". Anything else — RLS, auth, a
+    // transport failure — is not evidence the schema is absent.
+    return error.code === "PGRST205" ? "missing" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 /* -------------------------------- profile --------------------------------- */
 
 export async function fetchProfileRow(): Promise<{ name: string; email: string } | null> {
