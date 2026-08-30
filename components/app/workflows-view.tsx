@@ -56,25 +56,90 @@ function Chain({ steps, running }: { steps: Step[]; running?: number }) {
  * ship as starting points, and a run appears only once its calls have gone out
  * and come back.
  */
-function Facts({ w }: { w: Workflow }) {
+function Facts({ w, lastResult }: { w: Workflow; lastResult?: RunResult }) {
   const { runs } = useActivity(w.id);
   const last = runs[0];
 
+  /**
+   * The card used to show only `costOfSteps` — the price written on the
+   * template — under the flat label "Cost / run". Then a run would report the
+   * price the server actually quoted, and the two disagreed on screen: the card
+   * said 0.020 while the toast said 0.010. One of those numbers is a guess and
+   * the other is the endpoint's own answer, so they cannot share a label.
+   *
+   * Once anything has run, the quoted figure wins and says where it came from.
+   * Until then the template's number is shown as what it is: stated, not quoted.
+   */
+  const quoted = last?.cost;
+  const costRow: [string, string] =
+    quoted != null
+      ? ["Cost / run · quoted", `${usd(quoted, 3)} USDC`]
+      : ["Cost / run · stated", `${usd(costOfSteps(w.steps), 3)} USDC`];
+
   return (
-    <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 border-t border-black/[0.06] pt-3 text-[12.5px]">
-      {[
-        ["Trigger", w.trigger],
-        ["Steps", String(w.steps.length)],
-        ["Paid steps", String(paidSteps(w.steps))],
-        ["Cost / run", `${usd(costOfSteps(w.steps), 3)} USDC`],
-        ["Run from this browser", last ? `${runs.length}× · last ${ago(last.at)}` : "never"],
-      ].map(([k, v]) => (
-        <div key={k} className="flex items-baseline gap-1.5">
-          <dt className="text-neutral-400">{k}</dt>
-          <dd className="tnum text-neutral-700">{v}</dd>
-        </div>
-      ))}
-    </dl>
+    <>
+      <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 border-t border-black/[0.06] pt-3 text-[12.5px]">
+        {[
+          ["Trigger", w.trigger],
+          ["Steps", String(w.steps.length)],
+          ["Paid steps", String(paidSteps(w.steps))],
+          costRow,
+          ["Run from this browser", last ? `${runs.length}× · last ${ago(last.at)}` : "never"],
+        ].map(([k, v]) => (
+          <div key={k} className="flex items-baseline gap-1.5">
+            <dt className="text-neutral-400">{k}</dt>
+            <dd className="tnum text-neutral-700">{v}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {lastResult && <RunReport result={lastResult} />}
+    </>
+  );
+}
+
+/**
+ * What the last run actually did, left on the page.
+ *
+ * The only evidence a run had happened was a toast that cleared itself after a
+ * few seconds, so the most persuasive thing this app does — a real endpoint
+ * answering 402 with a live price — was gone before most people looked at it,
+ * and the step-by-step outcome was never shown at all. A run that leaves no
+ * trace is indistinguishable from a button that does nothing.
+ */
+function RunReport({ result }: { result: RunResult }) {
+  return (
+    <div className="mt-3 rounded-lg border border-black/[0.07] bg-neutral-50/70 p-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[12px] font-medium text-neutral-700">Last run</span>
+        <span className="tnum text-[11.5px] text-neutral-500">
+          {result.executed} executed · {usd(result.quotedUsdc, 3)} USDC quoted · {result.ms}ms
+        </span>
+      </div>
+      <ul className="mt-2 space-y-1">
+        {result.results.map((r, i) => (
+          <li key={`${r.name}-${i}`} className="flex items-baseline gap-2 text-[12px]">
+            <span
+              aria-hidden
+              className={cn(
+                "mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full",
+                !r.executed ? "bg-neutral-300" : r.ok ? "bg-emerald-500" : "bg-red-500"
+              )}
+            />
+            <span className="shrink-0 text-neutral-700">{r.name}</span>
+            <span className="min-w-0 flex-1 truncate text-neutral-500">
+              {r.executed
+                ? `${r.status} · ${r.quotedUsdc != null ? `${usd(r.quotedUsdc, 3)} USDC quoted` : "no price named"} · ${r.ms}ms`
+                : r.detail}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[11.5px] leading-relaxed text-neutral-500">
+        Prices here were decoded from the 402 each endpoint returned just now. No USDC moved — these calls
+        carried no payment, which is why the answer was 402.
+      </p>
+    </div>
   );
 }
 
@@ -91,6 +156,9 @@ export function WorkflowsView() {
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [running, setRunning] = useState<{ id: string; step: number } | null>(null);
+  // The last run's full result, per workflow, so the card can show what happened
+  // instead of relying on a toast the reader has already missed.
+  const [lastResults, setLastResults] = useState<Record<string, RunResult>>({});
   const workspace = useWorkspace();
   const { toast } = useToast();
 
@@ -133,6 +201,8 @@ export function WorkflowsView() {
       inFlight.current = false;
       setRunning(null);
     }
+
+    setLastResults((prev) => ({ ...prev, [w.id]: result }));
 
     recordRun(w.id, {
       // The outcome is the servers' answer, not the fact that the loop finished.
@@ -287,7 +357,7 @@ export function WorkflowsView() {
                     )}
                   </div>
 
-                  <Facts w={w} />
+                  <Facts w={w} lastResult={lastResults[w.id]} />
                 </div>
               </Sheet>
             );
