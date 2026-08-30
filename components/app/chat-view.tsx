@@ -6,7 +6,7 @@ import { Mark } from "@/components/ui/mark";
 import { cn } from "@/lib/utils";
 import { PageHead, Sheet } from "./bits";
 import { usePrefersReducedMotion } from "@/lib/mission/use-animation-frame";
-import { classify, runIntent, type IntentKind, type SettlementContext } from "@/lib/chat-intent";
+import { classify, runIntent, type IntentKind, type SettlementState } from "@/lib/chat-intent";
 import { useWorkspace } from "@/lib/real-data";
 
 type Fact = { label: string; value: string };
@@ -88,10 +88,13 @@ export function ChatView({
   // A ref, not the value: `send` closes over whatever was true when the message
   // was sent, and on a cold load that is "still loading". The getter lets the
   // receipts branch read the CURRENT value while it waits.
-  const settlementRef = useRef<SettlementContext | undefined>(undefined);
+  const settlementRef = useRef<SettlementState>({ status: "loading" });
   settlementRef.current = workspace.data
-    ? { runs: workspace.data.runs, mine: workspace.data.mine, round: workspace.data.chain.round }
-    : undefined;
+    ? {
+        status: "ready",
+        ctx: { runs: workspace.data.runs, mine: workspace.data.mine, round: workspace.data.chain.round },
+      }
+    : { status: workspace.status, error: workspace.error };
 
   const clearTimers = useCallback(() => {
     for (const t of timers.current) window.clearTimeout(t);
