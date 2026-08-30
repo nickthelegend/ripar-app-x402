@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:intent": "node lib/chat-intent.test.mts"
+    "test:intent": "node lib/chat-intent.test.mts",
+    "test:coverage": "node lib/settlement-coverage.test.mts",
+    "test": "npm run test:intent && npm run test:coverage"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
