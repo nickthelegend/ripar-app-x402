@@ -11,8 +11,13 @@ import { connectServer, disconnectServer, useMcpServers, type McpServer } from "
 
 /**
  * Attach an MCP server, then choose which of the tools it reports should reach
- * the palette. Introspection is mocked; everything after it — the picking, the
- * enabled set, detaching — is the real, persisted flow.
+ * the palette.
+ *
+ * Introspection used to be fabricated — any URL "connected" and produced a
+ * plausible tool list. It now performs the real `tools/list` JSON-RPC call, so
+ * a server that does not allow this origin fails instead of inventing a
+ * manifest. Everything after it — the picking, the enabled set, detaching — was
+ * always the real, persisted flow.
  */
 export function McpConnectModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const servers = useMcpServers();
@@ -180,9 +185,13 @@ export function McpConnectModal({ open, onClose }: { open: boolean; onClose: () 
               {err}
             </p>
           ) : (
+            // This used to name three hosts and promise that "any https host
+            // answers with a manifest", which was true only because the
+            // manifest was invented. The request is real now, so the hint has
+            // to describe a real precondition instead of an imaginary one.
             <p className="mt-1.5 text-[12px] leading-relaxed text-neutral-400">
-              Try mcp.linear.app, mcp.notion.com or mcp.stripe.com — any https host answers with a
-              manifest in this preview.
+              The server must speak MCP over HTTP and allow this origin — most public servers do not,
+              and will fail here rather than pretend to attach.
             </p>
           )}
         </div>
@@ -244,8 +253,10 @@ export function McpConnectModal({ open, onClose }: { open: boolean; onClose: () 
         )}
 
         <p className="text-[12px] leading-relaxed text-neutral-400">
-          Introspection is mocked in this preview — no request leaves the browser, and the tools
-          above are sample data. Enabled tools are stored on this device only.
+          Attaching runs a real <span className="font-mono text-[11.5px]">tools/list</span> call against the URL
+          you give, so the tools above are whatever that server actually reported. A server that has not
+          allowed this origin will fail here rather than appear to work. Enabled tools are stored on this
+          device only.
         </p>
 
         <div className="flex items-center justify-end gap-2">

@@ -115,85 +115,127 @@ export const builtInTool = (id: string | undefined) => (id ? BY_ID.get(id) : und
 
 export type McpManifest = { id: string; url: string; label: string; tools: McpTool[] };
 
-type Seed = { label: string; category: McpCategory; tools: [string, string, string, number?][] };
-
-// Mocked manifests. Nothing is fetched — see the note the connect modal shows.
-const SEEDS: Record<string, Seed> = {
-  "mcp.linear.app": {
-    label: "Linear",
-    category: "github",
-    tools: [
-      ["linear.list_issues", "List issues", "Issues in a team, filtered by state and assignee."],
-      ["linear.create_issue", "Create issue", "Files an issue with a title, description and estimate."],
-      ["linear.move_issue", "Move issue", "Moves an issue to another state or cycle."],
-      ["linear.add_comment", "Add comment", "Comments on an issue as the connected user."],
-    ],
-  },
-  "mcp.notion.com": {
-    label: "Notion",
-    category: "search",
-    tools: [
-      ["notion.search", "Search workspace", "Full-text search across pages and databases."],
-      ["notion.read_page", "Read page", "Returns a page's blocks as markdown."],
-      ["notion.append_block", "Append block", "Appends a block to the end of a page."],
-      ["notion.create_page", "Create page", "Creates a page inside a parent database."],
-    ],
-  },
-  "mcp.stripe.com": {
-    label: "Stripe",
-    category: "http",
-    tools: [
-      ["stripe.list_invoices", "List invoices", "Invoices for a customer, newest first."],
-      ["stripe.create_payment_link", "Create payment link", "Creates a shareable payment link for a price."],
-      ["stripe.refund_charge", "Refund charge", "Refunds a charge in full or in part."],
-    ],
-  },
-};
-
 const slug = (host: string) => host.replace(/^mcp\./, "").replace(/\.[a-z]+$/, "").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
 
 const titleCase = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
 
 /**
- * Stands in for an MCP `tools/list` handshake. The flow around it is real —
- * this returns what a server would say it exposes; the modal does the rest.
+ * A real MCP `tools/list` handshake.
+ *
+ * This used to be fabricated. It held hand-written catalogues for three well
+ * known hosts, invented a plausible three-tool manifest for every OTHER host,
+ * and slept 620ms first so the modal's loading state would look like a network
+ * round trip. Any URL you typed "connected" and produced tools that did not
+ * exist — the most convincing kind of fake, because it never failed.
+ *
+ * Now it performs the actual JSON-RPC call an MCP client makes and reports
+ * whatever really happens. Attaching an arbitrary server from a browser will
+ * often fail on CORS, and that is a true and useful answer: it tells you the
+ * server has not allowed this origin, which is a real thing to go and fix. It
+ * is not an excuse to invent a manifest.
  */
-export function introspect(rawUrl: string): Promise<McpManifest> {
-  return new Promise((resolve, reject) => {
-    let url: URL;
-    try {
-      url = new URL(rawUrl.trim());
-    } catch {
-      return reject(new Error("That is not a URL. Try https://mcp.example.com/sse"));
-    }
-    if (url.protocol !== "https:") return reject(new Error("MCP servers must be attached over https."));
+export async function introspect(rawUrl: string): Promise<McpManifest> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl.trim());
+  } catch {
+    throw new Error("That is not a URL. Try https://mcp.example.com/mcp");
+  }
+  if (url.protocol !== "https:") throw new Error("MCP servers must be attached over https.");
 
-    const id = slug(url.hostname);
-    const seed = SEEDS[url.hostname];
-    // A server nobody seeded still answers — with the three tools every MCP
-    // implementation carries — so the flow is exercisable against any host.
-    const spec: Seed = seed ?? {
-      label: titleCase(id.replace(/-/g, " ")),
-      category: "http",
-      tools: [
-        [`${id}.list_resources`, "List resources", "Resources this server exposes to the model."],
-        [`${id}.read_resource`, "Read resource", "Reads one resource by uri."],
-        [`${id}.call_tool`, "Call tool", "Invokes a named tool with a JSON argument object."],
-      ],
-    };
+  const id = slug(url.hostname);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
 
-    const tools: McpTool[] = spec.tools.map(([toolId, name, description, price]) => ({
-      id: toolId,
-      name,
-      description,
-      category: spec.category,
-      price,
-      inputs: [j("arguments", true, "JSON matching the tool's input schema")],
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // Servers speaking the Streamable HTTP transport reply as SSE.
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    // A cross-origin block and an unreachable host are different facts, but the
+    // browser deliberately refuses to tell them apart. Say exactly that rather
+    // than picking whichever one sounds better.
+    throw new Error(
+      `Could not reach ${url.hostname}. The browser reports no response, which is what both a CORS refusal ` +
+        `and an unreachable host look like from here — it will not distinguish them. ` +
+        (err instanceof Error && err.name === "AbortError" ? "It timed out after 12s." : "")
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) throw new Error(`${url.hostname} answered ${res.status} to tools/list.`);
+
+  const raw = await res.text();
+  const payload = parseRpc(raw);
+  if (!payload) throw new Error(`${url.hostname} answered, but not with JSON-RPC this client can read.`);
+  if (payload.error) {
+    throw new Error(`${url.hostname} refused tools/list: ${payload.error.message ?? "no reason given"}`);
+  }
+
+  const listed = payload.result?.tools;
+  if (!Array.isArray(listed)) {
+    throw new Error(`${url.hostname} returned no tools array, so there is nothing to attach.`);
+  }
+
+  const tools: McpTool[] = listed.map((entry) => {
+    const t = (entry ?? {}) as Record<string, unknown>;
+    return {
+      id: String(t.name ?? "unknown"),
+      name: String(t.title ?? t.name ?? "unknown"),
+      description: String(t.description ?? "No description given by the server."),
+      category: "http" as McpCategory,
+    // Price is not part of tools/list. Leaving it undefined is correct — the
+    // old code sometimes attached one, which meant a workflow could quote a
+    // number the server never named.
+      price: undefined,
+      inputs: inputsFromSchema(t.inputSchema),
       serverId: id,
-      serverLabel: spec.label,
-    }));
-
-    // Handshakes are not instant, and the modal has a loading state to show.
-    setTimeout(() => resolve({ id, url: url.toString(), label: spec.label, tools }), 620);
+      serverLabel: titleCase(id.replace(/-/g, " ")),
+    };
   });
+
+  return { id, url: url.toString(), label: titleCase(id.replace(/-/g, " ")), tools };
+}
+
+/** Streamable HTTP may frame the reply as SSE; plain JSON is also valid. */
+function parseRpc(raw: string): { result?: { tools?: unknown[] }; error?: { message?: string } } | null {
+  const direct = tryJson(raw);
+  if (direct) return direct;
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.startsWith("data:")) continue;
+    const parsed = tryJson(line.slice(5).trim());
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function tryJson(v: string): { result?: { tools?: unknown[] }; error?: { message?: string } } | null {
+  try {
+    const p = JSON.parse(v);
+    return p && typeof p === "object" ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Turn a JSON Schema into the input rows the palette renders. */
+function inputsFromSchema(schema: unknown): McpInput[] {
+  if (!schema || typeof schema !== "object") return [];
+  const s = schema as { properties?: Record<string, { description?: string }>; required?: string[] };
+  const required = new Set(s.required ?? []);
+  return Object.entries(s.properties ?? {}).map(([name, spec]) => ({
+    name,
+    type: "json" as const,
+    required: required.has(name),
+    hint: spec?.description,
+  }));
 }
