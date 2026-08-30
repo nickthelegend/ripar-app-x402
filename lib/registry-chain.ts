@@ -36,15 +36,22 @@ export const TESTNET_INDEXER = "https://testnet-idx.algonode.cloud";
 // literals, which made a MainNet cutover a code change in three repos rather
 // than a configuration change — and app ids are network-scoped, so 769444119
 // on MainNet is a stranger's contract, not this one.
+//
+// These defaults drifted once already: they named the pre-audit generation
+// (769444119/120/121) while ripar-contracts/DEPLOYED.json had moved on to the
+// audited one. The old ValidationRegistry has more history, which is exactly
+// why the drift survived — a fuller board looks healthier than a correct one.
+// scripts/check-registry-ids.mjs now fails the build if these three stop
+// matching DEPLOYED.json.
 const appId = (v: string | undefined, fallback: number) => {
   const n = Number(v);
   return Number.isInteger(n) && n > 0 ? n : fallback;
 };
 
 export const REGISTRY = {
-  identity: appId(process.env.NEXT_PUBLIC_IDENTITY_APP, 769_444_119),
-  reputation: appId(process.env.NEXT_PUBLIC_REPUTATION_APP, 769_444_120),
-  validation: appId(process.env.NEXT_PUBLIC_VALIDATION_APP, 769_444_121),
+  identity: appId(process.env.NEXT_PUBLIC_IDENTITY_APP, 770_382_913),
+  reputation: appId(process.env.NEXT_PUBLIC_REPUTATION_APP, 770_382_914),
+  validation: appId(process.env.NEXT_PUBLIC_VALIDATION_APP, 770_382_915),
 } as const;
 
 /** Box name prefixes, exactly as the contracts write them. */
