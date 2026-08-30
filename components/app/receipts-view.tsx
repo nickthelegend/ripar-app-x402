@@ -126,6 +126,19 @@ export function ReceiptsView() {
 
   return (
     <>
+      {/* A short list and a truncated list look identical, so the truncation
+          has to be said out loud. The dropped-block count used to go only to
+          console.warn, which means the only person who could tell the list was
+          incomplete was a developer with devtools open. */}
+      {(data?.settlements.dropped ?? 0) > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[12.5px] leading-relaxed text-amber-900">
+          <span className="font-semibold">This list is incomplete.</span>{" "}
+          {data!.settlements.dropped} of {data!.settlements.ofBlocks} blocks in the window could not be read
+          from the indexer, so settlements in those rounds are missing here. The totals below are of what was
+          read, not of what is on chain.
+        </div>
+      )}
+
       <PageHead
         title="Receipts"
         subtitle="One row per settlement read off Algorand — a USDC transfer that really moved. Payment goes straight from the caller to your payout address, Ripar is never in the path, so these are chain records rather than an account balance."

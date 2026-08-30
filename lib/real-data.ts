@@ -183,7 +183,18 @@ export type RealRun = {
   to: string;
 };
 
-async function fetchSettlements(net: ChainNetwork, signal?: AbortSignal, cap = 40): Promise<RealRun[]> {
+/**
+ * Settlements, plus how much of the window was actually readable.
+ *
+ * The dropped-block count used to go to console.warn and nowhere else, so a
+ * partial list rendered exactly like a complete one and only a developer with
+ * the console open could tell. That is the same failure as showing a loading
+ * state as a zero: the number on screen was true of what could be read, and
+ * false about the chain.
+ */
+export type SettlementRead = { runs: RealRun[]; dropped: number; ofBlocks: number };
+
+async function fetchSettlements(net: ChainNetwork, signal?: AbortSignal, cap = 40): Promise<SettlementRead> {
   const { indexer: INDEXER, usdc: USDC, feePayer: FEE_PAYER } = CHAIN[net];
   const legs = await j<{ transactions?: Record<string, unknown>[] }>(
     `${INDEXER}/v2/accounts/${FEE_PAYER}/transactions?limit=120`,
@@ -227,7 +238,11 @@ async function fetchSettlements(net: ChainNetwork, signal?: AbortSignal, cap = 4
       }
     }
   }
-  return out.sort((a, b) => b.round - a.round).slice(0, cap);
+  return {
+    runs: out.sort((a, b) => b.round - a.round).slice(0, cap),
+    dropped,
+    ofBlocks: rounds.length,
+  };
 }
 
 /* ── real agents: addresses that have actually been paid ───────────────── */
@@ -281,6 +296,12 @@ export type Workspace = {
    * a payment names the address it pays, never the endpoint it paid for.
    */
   mine: { calls: number; earnedUsdc: number };
+  /**
+   * How much of the settlement window was readable. `dropped > 0` means the
+   * rows below are a subset of what is on chain, and any view showing them has
+   * to say so rather than presenting a short list as the whole truth.
+   */
+  settlements: { dropped: number; ofBlocks: number };
 };
 
 /**
@@ -347,10 +368,11 @@ function useWorkspacePoll(enabled: boolean): Loadable<Workspace> {
         const net: ChainNetwork = manifest?.network === "mainnet" ? "mainnet" : "testnet";
         const { algod: ALGOD } = CHAIN[net];
 
-        const [runs, status] = await Promise.all([
+        const [settlementRead, status] = await Promise.all([
           fetchSettlements(net, ac.signal),
           j<{ "last-round": number }>(`${ALGOD}/v2/status`, ac.signal),
         ]);
+        const runs = settlementRead.runs;
 
         const head = status["last-round"];
         // Block time from the settlements already in hand, not two more round
@@ -388,6 +410,7 @@ function useWorkspacePoll(enabled: boolean): Loadable<Workspace> {
             endpoints,
             runs,
             agents: agentsFrom(runs, payTo),
+            settlements: { dropped: settlementRead.dropped, ofBlocks: settlementRead.ofBlocks },
             chain: { network: net, round: head, blockTime },
             mine: {
               calls: mineRuns.length,
