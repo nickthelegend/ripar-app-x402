@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Menu as MenuIcon, X } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { useDialogStack } from "@/components/ui/dialog-stack";
@@ -21,8 +21,70 @@ import { BoardView } from "./board-view";
 import { RegisterView } from "./register-view";
 import { ChordHint, ShortcutsOverlay, useShortcuts } from "./shortcuts";
 
+/**
+ * Which views exist as far as the URL is concerned.
+ *
+ * This was built from NAV alone, which quietly dropped `settings`: it is
+ * reached from the sidebar footer rather than the nav list, so `?view=settings`
+ * failed the membership test and fell back to overview. The page still answered
+ * 200 — it rendered, just not the view that was asked for — which is precisely
+ * the kind of failure a status-code check cannot see.
+ *
+ * Listed against the `View` union instead, so a view that exists but is not in
+ * the nav is still addressable, and TypeScript fails the build if a new view is
+ * added to the union and forgotten here.
+ */
+const VIEW_IDS: ReadonlySet<View> = new Set<View>([
+  "overview",
+  "chat",
+  "endpoints",
+  "workflows",
+  "agents",
+  "receipts",
+  "settings",
+  "directory",
+  "board",
+  "register",
+]);
+
 export function AppShell() {
-  const [view, setView] = useState<View>("overview");
+  const [view, setViewState] = useState<View>("overview");
+
+  /**
+   * The view lived only in React state, so every nav item was a button with no
+   * href: nothing could be linked to, the browser's back button walked out of
+   * the app entirely, and a refresh mid-flow dropped you back on Overview with
+   * whatever you were reading gone. For a workspace people are asked to compare
+   * against a chain explorer in another tab, not being able to send someone the
+   * tab you are looking at is a real cost.
+   *
+   * `pushState` on a view change, so back walks the views someone actually
+   * visited. The first cut used `replaceState` to avoid "stacking up history",
+   * which got the trade backwards: leaving the workspace entirely on the first
+   * press of back is worse than having entries to walk, and stacking entries is
+   * what history is for. `popstate` then restores the view from the URL.
+   */
+  useEffect(() => {
+    const fromUrl = () => {
+      const v = new URLSearchParams(window.location.search).get("view");
+      return v && VIEW_IDS.has(v as View) ? (v as View) : "overview";
+    };
+    setViewState(fromUrl());
+    const onPop = () => setViewState(fromUrl());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const setView = useCallback((next: View) => {
+    setViewState(next);
+    const url = new URL(window.location.href);
+    if (next === "overview") url.searchParams.delete("view");
+    else url.searchParams.set("view", next);
+    // Re-selecting the view you are already on is not a navigation, so it must
+    // not leave a duplicate entry that back has to step through twice.
+    if (url.href === window.location.href) return;
+    window.history.pushState(null, "", url);
+  }, []);
   // Held here so the conversation survives leaving Chat and coming back.
   const [turns, setTurns] = useState<Turn[]>([]);
   const [nav, setNav] = useState(false);
@@ -38,12 +100,12 @@ export function AppShell() {
     setView(v);
     setNav(false);
     if (v !== "chat") setSeed("");
-  }, []);
+  }, [setView]);
 
   const ask = useCallback((text: string) => {
     setSeed(text);
     setView("chat");
-  }, []);
+  }, [setView]);
 
   const { chord } = useShortcuts({
     onGo: go,
