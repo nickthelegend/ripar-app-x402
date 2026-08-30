@@ -362,8 +362,14 @@ function useWorkspacePoll(enabled: boolean): Loadable<Workspace> {
         // the agent settles on TestNet, so every earned figure was pinned at
         // zero and would have stayed there however much anyone paid.
         //
-        // Through this app's own origin, not the agent's: the agent sends no
-        // CORS header, so a browser is not allowed to read it directly.
+        // Through this app's own origin rather than the agent's. The reason
+        // used to be CORS — the agent sent no Access-Control-Allow-Origin, so a
+        // browser could not read it at all. It does now (`*`, with
+        // payment-required exposed), so this hop is no longer forced.
+        //
+        // It stays because the route is where `no-store` is applied: a manifest
+        // read through the browser cache can report a price the agent has since
+        // changed, and a stale price is worse than an extra hop.
         const manifest = await j<Manifest>(MANIFEST_ROUTE, ac.signal).catch(() => null);
         const net: ChainNetwork = manifest?.network === "mainnet" ? "mainnet" : "testnet";
         const { algod: ALGOD } = CHAIN[net];
