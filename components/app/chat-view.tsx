@@ -6,6 +6,8 @@ import { Mark } from "@/components/ui/mark";
 import { cn } from "@/lib/utils";
 import { PageHead, Sheet } from "./bits";
 import { usePrefersReducedMotion } from "@/lib/mission/use-animation-frame";
+import { classify, runIntent, type IntentKind, type SettlementContext } from "@/lib/chat-intent";
+import { useWorkspace } from "@/lib/real-data";
 
 type Fact = { label: string; value: string };
 
@@ -19,17 +21,31 @@ export type Turn = {
   stopped?: boolean;
 };
 
-/** Each of these produces a real request against the deployed agent. */
+/**
+ * Four suggestions that route four DIFFERENT ways, on purpose. The old set was
+ * four rephrasings of "what does it cost", which is how a box that only ever
+ * did one thing managed to look like it did several.
+ */
 const SUGGESTIONS = [
   "What does the summarise endpoint cost?",
-  "Show me the live 402 challenge",
-  "Who does payment actually go to?",
-  "How long is a quote valid for?",
+  "What jobs are on the board and how much is escrowed?",
+  "Which agents are registered?",
+  "How much has actually settled?",
 ];
 
-const AGENT_ENDPOINT =
-  process.env.NEXT_PUBLIC_AGENT_ENDPOINT ?? "api.ripar.io/api/summarize";
-
+/**
+ * The request each intent is about to make, named before it is made. `null`
+ * marks the branches that answer without asking anything — they must not draw
+ * a request line at all.
+ */
+const PENDING_CALL: Record<IntentKind, string | null> = {
+  quote: `POST ${process.env.NEXT_PUBLIC_AGENT_ENDPOINT ?? "api.ripar.io/api/summarize"}  — no payment attached`,
+  jobs: "GET /api/registry/jobs  — jb_ and es_ boxes",
+  agents: "GET /api/registry/agents  — ag_ boxes",
+  receipts: "indexer · settled USDC transfers",
+  help: null,
+  unsupported: null,
+};
 
 const WORD_MS = 30;
 
@@ -65,6 +81,18 @@ export function ChatView({
   // it — every other animated surface here already honours this.
   const reducedMotion = usePrefersReducedMotion();
 
+  // Settlements have no API route — the workspace poller reads them from the
+  // indexer and shares one copy. The chat answers from those same rows so it
+  // can never disagree with the Receipts table sitting one click away.
+  const workspace = useWorkspace();
+  // A ref, not the value: `send` closes over whatever was true when the message
+  // was sent, and on a cold load that is "still loading". The getter lets the
+  // receipts branch read the CURRENT value while it waits.
+  const settlementRef = useRef<SettlementContext | undefined>(undefined);
+  settlementRef.current = workspace.data
+    ? { runs: workspace.data.runs, mine: workspace.data.mine, round: workspace.data.chain.round }
+    : undefined;
+
   const clearTimers = useCallback(() => {
     for (const t of timers.current) window.clearTimeout(t);
     timers.current = [];
@@ -91,19 +119,18 @@ export function ChatView({
   }
 
   /**
-   * Ask the deployed agent for a real quote.
+   * Route the message, then answer from whatever that route actually returned.
    *
-   * This used to pick a canned script and type out a hardcoded reply that
-   * looked like a tool call — `Ran ripar.endpoint.update(...) → ok` — while no
-   * request left the browser. Every number in the answer was written by hand,
-   * and an input the scripts did not match still produced a confident-looking
-   * result. That is the one thing a reviewer checks for, and it made the whole
-   * surface unreadable as evidence.
+   * Two rewrites got us here. First this typed out a canned script while no
+   * request left the browser. That was replaced by a real request — but the
+   * SAME real request for every message, so "what is the capital of Peru"
+   * still came back as a confident reading of a payment header. Real numbers
+   * answering the wrong question is the more dangerous of the two failures,
+   * because it survives exactly the spot-check that catches the first.
    *
-   * Now the tool line is the request that actually goes out, the result line is
-   * what actually came back, and every figure below is decoded from the real
-   * PAYMENT-REQUIRED header. If the agent is unreachable the failure is shown
-   * as a failure, not smoothed into a success.
+   * Now `classify` picks the branch before anything is drawn, each branch hits
+   * a different live source, and the branches that cannot help say so instead
+   * of falling back to the one request this box knows how to make.
    */
   async function send(text: string) {
     const body = text.trim();
@@ -112,6 +139,13 @@ export function ChatView({
 
     const askId = ++counter;
     const replyId = ++counter;
+
+    // Classify BEFORE anything is drawn, so the pending tool line names the
+    // request this message will actually cause. It used to read
+    // "POST …/summarize" for every message, which meant the transcript had
+    // already committed to the wrong action before the answer existed.
+    const kind = classify(body);
+    const pendingCall = PENDING_CALL[kind];
 
     stick.current = true;
     setDraft("");
@@ -123,11 +157,7 @@ export function ChatView({
         id: replyId,
         role: "ripar",
         text: "",
-        tool: {
-          call: `POST ${AGENT_ENDPOINT}  — no payment attached`,
-          result: "asking…",
-          done: false,
-        },
+        tool: pendingCall ? { call: pendingCall, result: "asking…", done: false } : undefined,
         streaming: true,
       },
     ]);
@@ -136,50 +166,37 @@ export function ChatView({
     let reply: string;
     let facts: Fact[] | undefined;
     let result: string;
+    let toolCall: string | null = pendingCall;
 
     try {
-      const res = await fetch("/api/quote", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: body }),
-      });
-      const data = await res.json();
-
-      if (!data.ok || !data.paymentRequiredHeader) {
-        result = `${data.status ?? res.status} · no challenge returned`;
-        reply =
-          data.error ??
-          "The endpoint answered, but not with a payment challenge. Nothing was charged and nothing was signed.";
-      } else {
-        const q = JSON.parse(atob(data.paymentRequiredHeader));
-        const accept = q.accepts?.[0] ?? {};
-        const units = Number(accept.maxAmountRequired ?? accept.amount ?? 0);
-        const price = units / 1_000_000;
-
-        result = `${data.status} · ${data.elapsedMs}ms · ${data.paymentRequiredHeader.length}B header`;
-        reply =
-          `That endpoint is x402-gated. It answered ${data.status} in ${data.elapsedMs}ms and stated its terms in a ` +
-          `PAYMENT-REQUIRED header declaring x402 version ${q.x402Version ?? 2}. It wants ${price} USDC — ` +
-          `${units} base units divided by the asset's six decimals — settled on Algorand under the ${accept.scheme ?? "exact"} ` +
-          `scheme, and it will hold that quote for ${accept.maxTimeoutSeconds ?? "?"} seconds. Attach X-PAYMENT and retry ` +
-          `and the USDC goes straight to the address below. Nothing was paid to fetch this.`;
-        facts = [
-          { label: "Price", value: `${price} USDC (${units} base units)` },
-          { label: "Asset", value: String(accept.asset ?? "—") },
-          { label: "Pays to", value: String(accept.payTo ?? "—") },
-          { label: "Settle within", value: `${accept.maxTimeoutSeconds ?? "?"}s` },
-        ];
-      }
+      const out = await runIntent(kind, body, () => settlementRef.current);
+      result = out.result;
+      reply = out.reply;
+      facts = out.facts;
+      // A branch that made no request must not keep the placeholder tool line
+      // claiming one went out — that was the original lie in miniature.
+      if (out.call === null) toolCall = null;
+      else toolCall = out.call;
     } catch (err) {
       result = `failed after ${Date.now() - started}ms`;
       reply =
-        "Could not reach the agent to ask for a quote. That is a transport failure, not a refusal — " +
+        "Could not reach the source that answer needed. That is a transport failure, not a refusal — " +
         "nothing was signed, nothing was charged, and no state changed. " +
         (err instanceof Error ? err.message : "");
     }
 
     setTurns((t) =>
-      t.map((m) => (m.id === replyId && m.tool ? { ...m, tool: { ...m.tool, result, done: true } } : m))
+      t.map((m) =>
+        m.id === replyId
+          ? {
+              ...m,
+              // `toolCall === null` means the branch answered without asking
+              // anything. Dropping the line entirely is the honest render:
+              // leaving a greyed-out request there implies one was attempted.
+              tool: toolCall ? { call: toolCall, result, done: true } : undefined,
+            }
+          : m
+      )
     );
 
     if (reducedMotion) {
@@ -333,9 +350,11 @@ export function ChatView({
       </Sheet>
 
       <p className="mt-2.5 text-[12px] text-neutral-400">
-        Every answer here is a real request. The line above each reply is the call that
-        actually went out, and the figures are decoded from the challenge that came back —
-        nothing is scripted and no number is written by hand.
+        This is a router over four live sources, not a language model: pricing a paid call,
+        the job board, the agent registry and settled transfers. Where a reply carries a
+        request line, that is the call that actually went out and the figures under it are
+        decoded from what came back. Ask it anything outside those four and it will say so
+        rather than answer.
       </p>
     </>
   );
