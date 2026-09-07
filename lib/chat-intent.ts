@@ -34,28 +34,46 @@ export type IntentReply = {
 export type IntentKind = "quote" | "jobs" | "agents" | "receipts" | "help" | "unsupported";
 
 /**
- * Settlements do not have an API route — they are read from the indexer by the
- * workspace poller and shared through context, so the receipts branch is handed
- * the rows the rest of the shell is already showing rather than fetching a
- * second, possibly disagreeing copy.
+ * What the shell knows about settlements right now: the rows, or why there are
+ * none yet.
+ *
+ * Settlements have no API route — the workspace poller reads them from the
+ * indexer and shares one copy, so the receipts branch answers from the rows the
+ * rest of the shell is already showing rather than fetching a second, possibly
+ * disagreeing copy. Carrying the STATUS as well as the rows is what lets the
+ * branch tell "still loading" apart from "loaded, and there are none".
  */
-export type SettlementGetter = () => SettlementContext | undefined;
+export type SettlementState = {
+  status: "loading" | "ready" | "error";
+  ctx?: SettlementContext;
+  error?: string | null;
+};
+
+export type SettlementGetter = () => SettlementState;
 
 /**
- * Poll a getter until it yields, or give up. The context updates on the shell's
- * render cycle, so a snapshot taken when the message was sent can be undefined
- * while the very next frame has the data.
+ * Wait for the load that is already in flight to finish.
+ *
+ * The first version raced a fixed twenty-second deadline, which was the wrong
+ * shape of wait: a cold load reads a dozen blocks from the indexer and can take
+ * longer than that, so the honest "not loaded yet" branch fired on a healthy
+ * request that simply had not finished. A stopwatch cannot tell slow from
+ * broken.
+ *
+ * This waits on the shell's own status instead, so it ends exactly when the
+ * load genuinely succeeds or genuinely fails. The cap is a hang guard, not a
+ * deadline — an unbounded await would leave the composer locked forever if the
+ * poller wedged.
  */
-async function waitFor(
-  get: SettlementGetter | undefined,
-  timeoutMs: number
-): Promise<SettlementContext | undefined> {
-  if (!get) return undefined;
-  const deadline = Date.now() + timeoutMs;
+const HANG_GUARD_MS = 120_000;
+
+async function waitForSettlements(get: SettlementGetter | undefined): Promise<SettlementState> {
+  if (!get) return { status: "error", error: "no settlement source" };
+  const giveUp = Date.now() + HANG_GUARD_MS;
   for (;;) {
-    const v = get();
-    if (v) return v;
-    if (Date.now() >= deadline) return undefined;
+    const s = get();
+    if (s.status !== "loading") return s;
+    if (Date.now() >= giveUp) return { status: "error", error: "the workspace poller never settled" };
     await new Promise((r) => setTimeout(r, 250));
   }
 }
@@ -286,18 +304,20 @@ async function receipts(get?: SettlementGetter): Promise<IntentReply> {
    * provider, so an independent fetch would have to re-derive it and could
    * disagree with the Receipts table about which chain it read.
    */
-  const ctx = await waitFor(get, 20_000);
-  if (!ctx) {
+  const state = await waitForSettlements(get);
+  if (state.status !== "ready" || !state.ctx) {
     return {
       call: null,
       result: "settlements unavailable",
       reply:
-        "The settlement rows still had not loaded after twenty seconds, so there is nothing to report — which " +
-        "is a different fact from zero settlements, and must not be shown as one. The indexer is most likely " +
-        "unreachable from here; Receipts will be empty for the same reason.",
+        "The settlement rows could not be read, so there is nothing to report — which is a different fact from " +
+        "zero settlements and must not be shown as one. " +
+        (state.error ? `The reader gave: ${state.error}. ` : "") +
+        "Receipts will be empty for the same reason.",
     };
   }
 
+  const ctx = state.ctx;
   const runs = ctx.runs;
   const total = runs.reduce((n, r) => n + r.amountUsdc, 0);
   const payers = new Set(runs.map((r) => r.from)).size;

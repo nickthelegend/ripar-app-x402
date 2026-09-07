@@ -50,11 +50,28 @@ export function Sidebar({
   const { name, payout } = useSettings();
   // Real earnings, from settlements to the deployed agent's payout address.
   // It reads 0.00 until somebody actually pays, and that is the honest number.
-  const { data: ws } = useWorkspace();
+  //
+  // But only ONCE IT HAS READ. `?? 0` used to coalesce the loading state into a
+  // zero, so for the ~25s a cold settlement read takes, the rail stated "0.00
+  // USDC · no paid calls yet" over an address that had in fact been paid eleven
+  // times. Every other surface here is careful about this — Overview holds an
+  // em dash and says "reading the chain…" — and the rail quietly undercut them
+  // all, in the one spot that is visible from every view.
+  //
+  // Not-yet-known and none are different facts and must not render the same.
+  const { data: ws, status } = useWorkspace();
   // Whichever chain the data layer is really reading, not a fixed label.
   const chainName = networkLabel(ws?.chain.network ?? "testnet");
+  const known = ws != null;
   const earned = ws?.mine.earnedUsdc ?? 0;
   const calls = ws?.mine.calls ?? 0;
+  const callsLabel = !known
+    ? status === "error"
+      ? "settlements unreadable"
+      : "reading the chain…"
+    : calls === 0
+      ? "no paid calls yet"
+      : `${calls} paid ${calls === 1 ? "call" : "calls"}`;
   // Signed out is a real state here, not a placeholder to paper over: the auth
   // backend for this deployment is unreachable, so nobody is signed in. Saying
   // so is better than the persona this used to render, which showed every
@@ -112,11 +129,11 @@ export function Sidebar({
         <div className="rounded-xl border border-black/[0.08] bg-white p-3">
           <div className="text-[11.5px] text-neutral-500">Settled to your address</div>
           <div className="tnum mt-0.5 text-[17px] font-semibold tracking-tight text-neutral-900">
-            {usd(earned)}{" "}
+            {known ? usd(earned) : "—"}{" "}
             <span className="text-[11px] font-medium text-neutral-400">USDC</span>
           </div>
           <div className="mt-1 text-[11px] text-neutral-400">
-            {calls === 0 ? "no paid calls yet" : `${calls} paid ${calls === 1 ? "call" : "calls"}`}
+            {callsLabel}
           </div>
           <button
             type="button"

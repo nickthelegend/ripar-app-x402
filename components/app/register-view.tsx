@@ -77,7 +77,17 @@ export function RegisterView() {
 
   const alreadyRegistered = (check.data?.addressAgentId ?? 0) > 0;
   const domainTaken = (check.data?.domainAgentId ?? 0) > 0;
-  const ready = addressCheck.ok && trimmedDomain.length > 0 && !alreadyRegistered && !domainTaken;
+  // `?? 0` reads a pending check as "not registered", so Build was enabled
+  // during the 400ms debounce and the round trip after it. Clicking in that
+  // window composed a transaction the contract would reject — the compose route
+  // catches it and says which agent already holds the address, so nothing false
+  // was ever shown, but the button promised something it could not do.
+  //
+  // Requiring the check to have finished is the honest gate: not-yet-known is
+  // not the same as known-free.
+  const checked = check.state === "done";
+  const ready =
+    addressCheck.ok && trimmedDomain.length > 0 && checked && !alreadyRegistered && !domainTaken;
 
   // Guarded on a ref, not on the state flag below it. setState schedules a
   // re-render, so clicks dispatched before React commits all read the old value

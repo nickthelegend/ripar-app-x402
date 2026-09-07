@@ -5,6 +5,7 @@ import { Download, ExternalLink } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { ago, shortAddr, useWorkspace, type ChainNetwork, type RealRun } from "@/lib/real-data";
+import { settlementCoverage } from "@/lib/settlement-coverage";
 import { EmptyState, Metric, PageHead, SearchInput, Segmented, Sheet, SortHeader } from "./bits";
 
 type Scope = "mine" | "all";
@@ -72,6 +73,7 @@ function downloadCsv(filename: string, csv: string): boolean {
  */
 export function ReceiptsView() {
   const { data, status, error } = useWorkspace();
+  const coverage = settlementCoverage(data?.settlements.dropped ?? 0, data?.settlements.ofBlocks ?? 0);
   // "Mine" first: this page is about what the deployed agent has been paid. The
   // network-wide list is one tab away, so a quiet address is not a dead end.
   const [scope, setScope] = useState<Scope>("mine");
@@ -126,6 +128,20 @@ export function ReceiptsView() {
 
   return (
     <>
+      {/* A short list and a truncated list look identical, so the truncation
+          has to be said out loud. The dropped-block count used to go only to
+          console.warn, where only a developer with devtools open would see it.
+
+          The wording is decided in lib/settlement-coverage so it can be tested:
+          this banner only appears when the indexer drops a block mid-read, which
+          is intermittent and — with block reads cached — not reproducible on
+          demand, so the logic would otherwise ship unverified. */}
+      {coverage.complete === false && (
+        <div className="mb-4 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-[12.5px] leading-relaxed text-amber-900">
+          <span className="font-semibold">This list is incomplete.</span> {coverage.message}
+        </div>
+      )}
+
       <PageHead
         title="Receipts"
         subtitle="One row per settlement read off Algorand — a USDC transfer that really moved. Payment goes straight from the caller to your payout address, Ripar is never in the path, so these are chain records rather than an account balance."
