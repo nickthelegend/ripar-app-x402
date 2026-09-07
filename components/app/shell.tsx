@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { Menu as MenuIcon, X } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { useDialogStack } from "@/components/ui/dialog-stack";
@@ -47,43 +47,64 @@ const VIEW_IDS: ReadonlySet<View> = new Set<View>([
   "register",
 ]);
 
-export function AppShell() {
-  const [view, setViewState] = useState<View>("overview");
+/**
+ * The view, read from the URL.
+ *
+ * The view lived only in React state, so every nav item was a button with no
+ * href: nothing could be linked to, the browser's back button walked out of the
+ * app entirely, and a refresh mid-flow dropped you on Overview with whatever
+ * you were reading gone. For a workspace people are asked to compare against a
+ * chain explorer in another tab, not being able to send someone the tab you are
+ * looking at is a real cost.
+ *
+ * The URL is an external store, so it is read with `useSyncExternalStore`
+ * rather than mirrored into state. The first version did mirror it — a
+ * `useState` seeded by an effect — which meant setState ran synchronously on
+ * mount, tripping react-hooks/set-state-in-effect and rendering Overview for
+ * one frame before correcting itself. Mirroring an external value into state is
+ * the thing this hook exists to replace.
+ *
+ * `getServerSnapshot` returns "overview" because the server has no URL search
+ * to read and a hydration mismatch here would be a real one.
+ */
+const viewListeners = new Set<() => void>();
 
-  /**
-   * The view lived only in React state, so every nav item was a button with no
-   * href: nothing could be linked to, the browser's back button walked out of
-   * the app entirely, and a refresh mid-flow dropped you back on Overview with
-   * whatever you were reading gone. For a workspace people are asked to compare
-   * against a chain explorer in another tab, not being able to send someone the
-   * tab you are looking at is a real cost.
-   *
-   * `pushState` on a view change, so back walks the views someone actually
-   * visited. The first cut used `replaceState` to avoid "stacking up history",
-   * which got the trade backwards: leaving the workspace entirely on the first
-   * press of back is worse than having entries to walk, and stacking entries is
-   * what history is for. `popstate` then restores the view from the URL.
-   */
-  useEffect(() => {
-    const fromUrl = () => {
-      const v = new URLSearchParams(window.location.search).get("view");
-      return v && VIEW_IDS.has(v as View) ? (v as View) : "overview";
-    };
-    setViewState(fromUrl());
-    const onPop = () => setViewState(fromUrl());
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
+function subscribeToView(onChange: () => void) {
+  viewListeners.add(onChange);
+  window.addEventListener("popstate", onChange);
+  return () => {
+    viewListeners.delete(onChange);
+    window.removeEventListener("popstate", onChange);
+  };
+}
+
+/** A string, so React's identity check compares by value and settles. */
+function viewSnapshot(): View {
+  const v = new URLSearchParams(window.location.search).get("view");
+  return v && VIEW_IDS.has(v as View) ? (v as View) : "overview";
+}
+
+const serverViewSnapshot = (): View => "overview";
+
+export function AppShell() {
+  const view = useSyncExternalStore(subscribeToView, viewSnapshot, serverViewSnapshot);
 
   const setView = useCallback((next: View) => {
-    setViewState(next);
     const url = new URL(window.location.href);
     if (next === "overview") url.searchParams.delete("view");
     else url.searchParams.set("view", next);
     // Re-selecting the view you are already on is not a navigation, so it must
     // not leave a duplicate entry that back has to step through twice.
     if (url.href === window.location.href) return;
+    // `pushState` so back walks the views someone actually visited. The first
+    // cut used `replaceState` to avoid "stacking up history", which got the
+    // trade backwards: leaving the workspace on the first press of back is
+    // worse than having entries to walk, and stacking entries is what history
+    // is for.
+    //
+    // pushState does not fire popstate, so subscribers are told directly.
     window.history.pushState(null, "", url);
+    for (const l of viewListeners) l();
   }, []);
   // Held here so the conversation survives leaving Chat and coming back.
   const [turns, setTurns] = useState<Turn[]>([]);

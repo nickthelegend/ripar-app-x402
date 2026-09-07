@@ -89,12 +89,19 @@ export function ChatView({
   // was sent, and on a cold load that is "still loading". The getter lets the
   // receipts branch read the CURRENT value while it waits.
   const settlementRef = useRef<SettlementState>({ status: "loading" });
-  settlementRef.current = workspace.data
-    ? {
-        status: "ready",
-        ctx: { runs: workspace.data.runs, mine: workspace.data.mine, round: workspace.data.chain.round },
-      }
-    : { status: workspace.status, error: workspace.error };
+  // Written in an effect, not during render. Assigning a ref while rendering is
+  // a write to something React does not track, and in concurrent rendering a
+  // render can be thrown away or replayed — so the value a discarded render
+  // wrote would stick. The receipts branch reads this through a getter well
+  // after the commit, so an effect is soon enough.
+  useEffect(() => {
+    settlementRef.current = workspace.data
+      ? {
+          status: "ready",
+          ctx: { runs: workspace.data.runs, mine: workspace.data.mine, round: workspace.data.chain.round },
+        }
+      : { status: workspace.status, error: workspace.error };
+  }, [workspace.data, workspace.status, workspace.error]);
 
   const clearTimers = useCallback(() => {
     for (const t of timers.current) window.clearTimeout(t);
