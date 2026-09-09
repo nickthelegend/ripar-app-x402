@@ -325,18 +325,25 @@ async function receipts(get?: SettlementGetter): Promise<IntentReply> {
   return {
     call: "indexer · settled USDC transfers, as read by the workspace poller",
     result: `${runs.length} settlements · round ${ctx.round ?? "?"}`,
+    // Two reads, two sentences. "Of those, N paid this workspace's own
+    // address" tied the second number to the first, and once `mine` became an
+    // all-time read of our own address while the list stayed a twelve-round
+    // network window, it printed "8 settled transfers in view. Of those, 139
+    // paid this workspace" — 139 of 8. Both figures were right; the word
+    // joining them was not.
     reply:
-      `There ${runs.length === 1 ? "is" : "are"} ${runs.length} settled x402 ` +
-      `transfer${runs.length === 1 ? "" : "s"} in view, totalling ${total.toFixed(3)} USDC across ${payers} ` +
-      `distinct payer${payers === 1 ? "" : "s"}. Of those, ${ctx.mine.calls} paid this workspace's own address, ` +
-      `worth ${ctx.mine.earnedUsdc.toFixed(3)} USDC. These are chain records rather than an account balance — ` +
+      `Across the network, ${runs.length} settled x402 transfer${runs.length === 1 ? "" : "s"} ` +
+      `${runs.length === 1 ? "is" : "are"} in the recent window this workspace reads, totalling ` +
+      `${total.toFixed(3)} USDC across ${payers} distinct payer${payers === 1 ? "" : "s"}. ` +
+      `Separately, and over all time rather than that window, this workspace's own payout address has been ` +
+      `paid ${ctx.mine.calls} time${ctx.mine.calls === 1 ? "" : "s"}, worth ` +
+      `${ctx.mine.earnedUsdc.toFixed(3)} USDC. These are chain records rather than an account balance — ` +
       `payment goes straight from the caller to the payee and Ripar is never in the path, so nothing here moves ` +
       `unless somebody actually pays.`,
     facts: [
-      { label: "Settlements in view", value: String(runs.length) },
-      { label: "Total", value: `${total.toFixed(3)} USDC` },
-      { label: "Distinct payers", value: String(payers) },
-      { label: "Paid to this address", value: `${ctx.mine.calls} · ${ctx.mine.earnedUsdc.toFixed(3)} USDC` },
+      { label: "Network, recent window", value: `${runs.length} · ${total.toFixed(3)} USDC` },
+      { label: "Distinct payers (window)", value: String(payers) },
+      { label: "This address, all time", value: `${ctx.mine.calls} · ${ctx.mine.earnedUsdc.toFixed(3)} USDC` },
     ],
   };
 }
