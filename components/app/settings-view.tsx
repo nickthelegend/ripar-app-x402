@@ -33,17 +33,32 @@ export function SettingsView() {
   // hydration and how a save is confirmed — with no effect syncing the two.
   return (
     <>
-      {schema === "missing" ? (
+      {/* Anything that is not "ready" means edits are not leaving this
+          browser, and the page has to say so. It used to render only for
+          `missing`; when the Supabase project became unreachable the probe
+          threw, fell through to `unknown`, and the page said nothing at all
+          while still saving nothing — the exact silence this banner exists to
+          break, arriving through the one branch it did not cover. */}
+      {schema !== "ready" && schema !== "unknown" ? (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
           <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
           <p className="text-[12.5px] leading-relaxed text-amber-900">
             <span className="font-medium">Nothing on this page is being saved to a database.</span>{" "}
-            The Supabase project answers, but its tables are not there — the migration in{" "}
-            <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11.5px]">
-              supabase/migrations/0001_init.sql
-            </code>{" "}
-            has not been applied. Edits are kept in this browser and will not follow you to another
-            device. Apply the migration to make them durable.
+            {schema === "missing" ? (
+              <>
+                The Supabase project answers, but its tables are not there — the migration in{" "}
+                <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11.5px]">
+                  supabase/migrations/0001_init.sql
+                </code>{" "}
+                has not been applied.
+              </>
+            ) : (
+              <>
+                The database could not be reached at all — the request never arrived, which is what a
+                paused project, a DNS failure or a blocked origin all look like from here.
+              </>
+            )}{" "}
+            Edits are kept in this browser and will not follow you to another device.
           </p>
         </div>
       ) : null}

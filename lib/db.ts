@@ -37,7 +37,21 @@ async function session() {
  *   "missing"  — reachable, but the migration has not been applied
  *   "unknown"  — no client, no session, or the host did not answer
  */
-export type SchemaState = "ready" | "missing" | "unknown";
+/**
+ * Whether this workspace can actually persist anything.
+ *
+ * `unknown` used to cover both "we could not tell" and "we did not ask", and
+ * the Settings banner only rendered for `missing` — so when the Supabase
+ * project became unreachable entirely (free-tier projects pause when idle) the
+ * probe threw, fell to `unknown`, and the page went silent while still not
+ * saving a thing. The banner exists precisely to stop that, and the one
+ * condition it did not cover is the one that happened.
+ *
+ * `unreachable` is split out so the UI can say the true thing in each case:
+ * the tables are absent and here is the migration, versus we cannot reach the
+ * database at all. Both mean nothing is being saved, and both have to say so.
+ */
+export type SchemaState = "ready" | "missing" | "unreachable" | "unknown";
 
 export async function schemaState(): Promise<SchemaState> {
   const supabase = createClient();
@@ -47,9 +61,14 @@ export async function schemaState(): Promise<SchemaState> {
     if (!error) return "ready";
     // PGRST205 is "could not find the table". Anything else — RLS, auth, a
     // transport failure — is not evidence the schema is absent.
-    return error.code === "PGRST205" ? "missing" : "unknown";
+    if (error.code === "PGRST205") return "missing";
+    // A PostgREST error with no code at all is what a dead host looks like
+    // through supabase-js: the request never reached PostgREST to be answered.
+    return error.code ? "unknown" : "unreachable";
   } catch {
-    return "unknown";
+    // fetch itself threw — DNS, TLS, a paused project. We are certainly not
+    // saving, and we cannot say why beyond "could not reach it".
+    return "unreachable";
   }
 }
 
