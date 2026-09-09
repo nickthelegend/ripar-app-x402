@@ -84,25 +84,32 @@ export function ReceiptsView() {
   // Memoised because `?? []` builds a fresh array on every render, which
   // changed the deps of every useMemo below it and defeated all of them.
   const runs = useMemo(() => data?.runs ?? [], [data?.runs]);
+  // All-time, read from our own payout address. Kept separate from `runs`
+  // (the network's recent window) because they answer different questions.
+  const mineRuns = useMemo(() => data?.mineRuns ?? [], [data?.mineRuns]);
   const payTo = data?.manifest?.payTo;
   // The chain these rows were actually read from. The fallback is never on
   // screen — a row only exists once `data` is in hand, and so has a network.
   const net = data?.chain.network ?? "testnet";
 
   const counts = useMemo(
-    () => ({ all: runs.length, mine: payTo ? runs.filter((r) => r.to === payTo).length : 0 }),
-    [runs, payTo]
+    () => ({ all: runs.length, mine: mineRuns.length }),
+    [runs, mineRuns]
   );
 
   const rows = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const scoped = scope === "mine" ? (payTo ? runs.filter((r) => r.to === payTo) : []) : runs;
+    // `mine` is the agent's own all-time history; `all` is the network's
+    // recent window. They answer different questions and must not be derived
+    // from each other — filtering the window for "mine" is what made Receipts
+    // claim nobody had ever paid an address with 46 transfers against it.
+    const scoped = scope === "mine" ? mineRuns : runs;
     const found = term
       ? scoped.filter((r) => `${r.id} ${r.from} ${r.to}`.toLowerCase().includes(term))
       : scoped;
     const dir = sort.dir === "asc" ? 1 : -1;
     return [...found].sort((a, b) => (a[sort.field] - b[sort.field]) * dir);
-  }, [runs, payTo, scope, q, sort]);
+  }, [runs, mineRuns, scope, q, sort]);
 
   const totals = useMemo(() => {
     const gross = rows.reduce((n, r) => n + r.amountUsdc, 0);

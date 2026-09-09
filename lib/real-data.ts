@@ -194,6 +194,54 @@ export type RealRun = {
  */
 export type SettlementRead = { runs: RealRun[]; dropped: number; ofBlocks: number };
 
+/**
+ * Every USDC transfer this agent has ever received, read from its own address.
+ *
+ * `fetchSettlements` reads the FEE PAYER's recent transactions and keeps the
+ * twelve most recent rounds. That is the right shape for a network-wide view —
+ * "what is settling right now, across all agents" — and the wrong shape for
+ * "has anyone paid ME". The moment other people's traffic pushed this agent's
+ * history out of that window, Receipts stated "Nobody has paid your agent yet"
+ * about an address that had received 46 transfers totalling 0.53 USDC. The
+ * number was true of the window and false about the chain, which is the one
+ * thing nothing here is allowed to be.
+ *
+ * Your own history is a single indexer query against your own address, so it
+ * is answered from the whole chain rather than from a slice of it.
+ */
+async function fetchMine(
+  net: ChainNetwork,
+  payTo: string,
+  signal?: AbortSignal,
+  cap = 200
+): Promise<RealRun[]> {
+  const { indexer: INDEXER, usdc: USDC } = CHAIN[net];
+  const res = await j<{ transactions?: Record<string, unknown>[] }>(
+    `${INDEXER}/v2/accounts/${payTo}/transactions?asset-id=${USDC}&limit=${cap}`,
+    signal
+  );
+
+  const out: RealRun[] = [];
+  for (const t of res.transactions ?? []) {
+    const x = t["asset-transfer-transaction"] as Record<string, unknown> | undefined;
+    // Inbound only, and non-zero: an opt-in is a 0-amount transfer to yourself
+    // and is not a payment.
+    if (t["tx-type"] !== "axfer" || !x || x.receiver !== payTo) continue;
+    const amount = Number(x.amount ?? 0);
+    if (amount <= 0) continue;
+    out.push({
+      id: String(t.id),
+      target: payTo,
+      round: Number(t["confirmed-round"]),
+      when: Number(t["round-time"] ?? 0) * 1000,
+      amountUsdc: amount / 1e6,
+      from: String(t.sender),
+      to: payTo,
+    });
+  }
+  return out.sort((a, b) => b.round - a.round);
+}
+
 async function fetchSettlements(net: ChainNetwork, signal?: AbortSignal, cap = 40): Promise<SettlementRead> {
   const { indexer: INDEXER, usdc: USDC, feePayer: FEE_PAYER } = CHAIN[net];
   const legs = await j<{ transactions?: Record<string, unknown>[] }>(
@@ -292,10 +340,15 @@ export type Workspace = {
    *  link a transaction to the right explorer instead of assuming MainNet. */
   chain: { network: ChainNetwork; round: number | null; blockTime: number | null };
   /**
-   * Settlements to OUR payout address specifically. Agent-wide by necessity —
-   * a payment names the address it pays, never the endpoint it paid for.
+   * Settlements to OUR payout address specifically, read from that address's
+   * own history and therefore ALL TIME — not a slice of the network window.
+   * Agent-wide by necessity: a payment names the address it pays, never the
+   * endpoint it paid for.
    */
   mine: { calls: number; earnedUsdc: number };
+  /** The rows behind `mine`, so a view can list them rather than re-filter the
+   *  network window and disagree with the totals above it. */
+  mineRuns: RealRun[];
   /**
    * How much of the settlement window was readable. `dropped > 0` means the
    * rows below are a subset of what is on chain, and any view showing them has
@@ -393,7 +446,10 @@ function useWorkspacePoll(enabled: boolean): Loadable<Workspace> {
         const blockTime = measureBlockTime(runs);
 
         const payTo = manifest?.payTo;
-        const mineRuns = payTo ? runs.filter((r) => r.to === payTo) : [];
+        // All time, from our own address — not `runs.filter(...)`, which could
+        // only ever see the twelve-round network window and reported zero the
+        // moment this agent's history aged out of it.
+        const mineRuns = payTo ? await fetchMine(net, payTo, ac.signal).catch(() => []) : [];
 
         // No per-endpoint call count or revenue, on purpose. A settlement is a
         // USDC transfer to the agent's payout address; it carries the payer, the
@@ -415,13 +471,22 @@ function useWorkspacePoll(enabled: boolean): Loadable<Workspace> {
             manifest,
             endpoints,
             runs,
-            agents: agentsFrom(runs, payTo),
+            // Union, deduped by txid: the network window shows who is active
+            // right now, our own all-time history makes sure this agent is
+            // present even when its payments have aged out of that window.
+            // Built from one merged list so a row's totals cannot disagree with
+            // the totals shown above it.
+            agents: agentsFrom(
+              [...new Map([...runs, ...mineRuns].map((r) => [r.id, r])).values()],
+              payTo
+            ),
             settlements: { dropped: settlementRead.dropped, ofBlocks: settlementRead.ofBlocks },
             chain: { network: net, round: head, blockTime },
             mine: {
               calls: mineRuns.length,
               earnedUsdc: mineRuns.reduce((s2, r) => s2 + r.amountUsdc, 0),
             },
+            mineRuns,
           },
         });
       } catch (e) {
