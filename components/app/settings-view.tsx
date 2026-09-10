@@ -9,6 +9,7 @@ import { usd } from "@/lib/app-data";
 import { ADDRESS_LENGTH, checkAddress, shortAddress } from "@/lib/algorand-address";
 import { maskKey, mintApiKey, saveSettings, useSettings, type ApiKey, type SpendCaps } from "@/lib/settings";
 import { schemaState, type SchemaState } from "@/lib/db";
+import { mustWarnAboutPersistence } from "@/lib/schema-banner";
 import { CopyButton, PageHead, Sheet, SortHeader } from "./bits";
 
 export function SettingsView() {
@@ -34,12 +35,20 @@ export function SettingsView() {
   return (
     <>
       {/* Anything that is not "ready" means edits are not leaving this
-          browser, and the page has to say so. It used to render only for
-          `missing`; when the Supabase project became unreachable the probe
-          threw, fell through to `unknown`, and the page said nothing at all
-          while still saving nothing — the exact silence this banner exists to
-          break, arriving through the one branch it did not cover. */}
-      {schema !== "ready" && schema !== "unknown" ? (
+          browser, and the page has to say so.
+
+          This condition has now been wrong twice, the same way both times. It
+          rendered only for `missing`, so when the project became unreachable
+          the page went silent; `unreachable` was added, and the silence simply
+          moved to `unknown` — which is the state a deployment with no Supabase
+          credentials lands in, i.e. this one. Measured in the browser: zero
+          requests to Supabase and no banner, while every save was dropped.
+
+          So the test is now the honest one. `ready` is the ONLY state in which
+          we have evidence that a save persists; every other state says so, and
+          the four differ only in the explanation they give. A new state added
+          later is loud by default rather than silent by default. */}
+      {mustWarnAboutPersistence(schema) ? (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
           <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
           <p className="text-[12.5px] leading-relaxed text-amber-900">
@@ -52,10 +61,20 @@ export function SettingsView() {
                 </code>{" "}
                 has not been applied.
               </>
-            ) : (
+            ) : schema === "unreachable" ? (
               <>
                 The database could not be reached at all — the request never arrived, which is what a
                 paused project, a DNS failure or a blocked origin all look like from here.
+              </>
+            ) : schema === "unconfigured" ? (
+              <>
+                This deployment has no database credentials, so nothing is even attempted — there is
+                no Supabase project behind this page to save to.
+              </>
+            ) : (
+              <>
+                The database answered with something that could not be read as either success or a
+                missing table, so this page cannot claim a save is landing.
               </>
             )}{" "}
             Edits are kept in this browser and will not follow you to another device.

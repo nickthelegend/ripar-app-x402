@@ -51,11 +51,15 @@ async function session() {
  * the tables are absent and here is the migration, versus we cannot reach the
  * database at all. Both mean nothing is being saved, and both have to say so.
  */
-export type SchemaState = "ready" | "missing" | "unreachable" | "unknown";
+export type SchemaState = "ready" | "missing" | "unreachable" | "unconfigured" | "unknown";
 
 export async function schemaState(): Promise<SchemaState> {
   const supabase = createClient();
-  if (!supabase) return "unknown";
+  // No client at all means no credentials are configured for this deployment.
+  // That is the most certain answer of the lot — nothing is being saved and we
+  // know exactly why — so it must NOT be folded into "unknown", which the UI
+  // used to treat as "say nothing".
+  if (!supabase) return "unconfigured";
   try {
     const { error } = await supabase.from("profiles").select("id").limit(1);
     if (!error) return "ready";
