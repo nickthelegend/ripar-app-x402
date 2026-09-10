@@ -25,8 +25,16 @@ test("every other state warns — silence is never the default", () => {
 });
 
 test("the state this deployment is actually in warns", () => {
-  // No Supabase credentials are configured, so createClient() returns null and
-  // schemaState() reports `unconfigured`. This is the case that was silent in
-  // production while every save was dropped.
+  // Measured, not assumed. NEXT_PUBLIC_SUPABASE_URL is set on this project, so
+  // a client IS created and the probe runs; the host
+  // (shftwalxcykqonzbzmpe.supabase.co) no longer resolves, the fetch throws,
+  // and schemaState() reports `unreachable`.
+  //
+  // I first recorded this as `unconfigured` after reading the code and assuming
+  // no credentials were set — I had checked the env of the wrong project. The
+  // banner's own wording on the live site ("could not be reached at all") is
+  // what corrected it.
+  assert.equal(mustWarnAboutPersistence("unreachable"), true);
+  // Kept alongside, because a project with no credentials must warn too.
   assert.equal(mustWarnAboutPersistence("unconfigured"), true);
 });
